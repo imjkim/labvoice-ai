@@ -1,0 +1,7 @@
+{
+  "name": "voiceops-web",
+  "private": true,
+  "type": "module",
+  "description": "No-build bench client. Tests use only Node built-ins.",
+  "scripts": { "test": "node --test" }
+}
