@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 import tempfile
 from pathlib import Path
 
@@ -102,4 +103,25 @@ def test_down_means_any_status_other_than_online():
                 assert set(down["down"]) == {"HE-01", "IHC-01"}  # maintenance + qc_hold, neither is 'offline'
                 everything = (await host.call("lims__list_instruments", {})).data
                 assert set(everything["down"]) == {"HE-01", "IHC-01"} and everything["count"] == 9
+    anyio.run(main)
+
+
+def test_future_year_prefix_is_rejected_with_a_hint():
+    """Observed in evals: the model turned "287" into "S28-0287"."""
+    async def main():
+        with tempfile.TemporaryDirectory() as d:
+            async with MCPHost(default_servers(str(Path(d) / "lims.db"))) as host:
+                yy = datetime.now(timezone.utc).year % 100
+                out = await host.call("lims__get_specimen", {"accession": f"S{yy + 2:02d}-0287"})
+                assert not out.ok and f"Did you mean S{yy:02d}-00287" in out.error
+                assert (await host.call("lims__get_specimen", {"accession": "287"})).ok
+    anyio.run(main)
+
+
+def test_accession_parameter_is_described_in_the_schema():
+    async def main():
+        with tempfile.TemporaryDirectory() as d:
+            async with MCPHost(default_servers(str(Path(d) / "lims.db"))) as host:
+                props = host.tools["lims__get_specimen"].openai_schema()["function"]["parameters"]["properties"]
+                assert "Never add or guess a year prefix" in props["accession"]["description"]
     anyio.run(main)
