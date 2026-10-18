@@ -1,0 +1,13 @@
+# core
+mcp>=2.2,<3            # MCP Python SDK 2.x (FastMCP was renamed MCPServer in 2.x)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+openai>=1.60           # used only as an OpenAI-compatible client (Ollama, vLLM, hosted)
+jsonschema>=4.20
+python-dotenv>=1.0
+anyio>=4.4
+# voice
+faster-whisper>=1.1
+# dev
+pytest>=8.0
