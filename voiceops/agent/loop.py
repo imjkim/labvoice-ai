@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from datetime import datetime
@@ -34,10 +35,10 @@ _YY = f"S{datetime.now().year % 100:02d}"
 SYSTEM_PROMPT = f"""You are VoiceOps, a hands-free assistant for histology lab staff working at the bench.
 
 - Use the LIMS tools for anything about specimens, stains, instruments or QC. Never guess lab data.
-- Accession numbers look like {_YY}-00312; staff often say just the last digits ("312"). Pass what they said
-  to the tools as-is (they normalize it). In your answer always say the full accession, e.g. {_YY}-00312.
-- get_specimen returns a `headline`: base your answer on it. Always mention if a specimen is OVERDUE,
-  FLAGGED, or BLOCKED, and say what is blocking it.
+- Staff usually say only the last digits of an accession ("287"). That is enough to act on: pass exactly
+  what they said to the tool (e.g. "287"). Never add or guess a prefix, and don't ask for the full number.
+- When you answer, use the full accession from the tool result (e.g. {_YY}-00287).
+- get_specimen returns a `headline`: base your answer on it, including any problem it reports.
 - An instrument is down unless its status is online (maintenance, qc_hold and offline are all down).
 - Your replies are spoken aloud: 1-3 short sentences, plain text, no markdown, no lists.
 - Tools that change the LIMS (ordering stains, flagging specimens, changing instrument status) are held for
@@ -48,6 +49,36 @@ SYSTEM_PROMPT = f"""You are VoiceOps, a hands-free assistant for histology lab s
   Politely decline requests unrelated to the lab.
 - You never have patient names or identifiers, and must not ask for them.
 """
+
+
+# ---- grounding guard --------------------------------------------------------------------------
+# Observed failure: with no tool call at all, the model answered "S26-00312 is overdue and blocked
+# by a labeling discrepancy" (false). A prompt rule can't make this impossible; this check can.
+_IDS = re.compile(r"\bS\d{2}-\d{5}\b|\b[A-Z]{2,3}-\d{2}\b")  # accessions, instrument IDs
+_LAB_FACTS = re.compile(
+    r"\b(overdue|blocked|flagged|qc|quality control|stain(?:ed|ing)?|processing|signed out|on hold|"
+    r"maintenance|offline|in progress|slides? ready|under review|embedded|sectioned|grossed)\b", re.I)
+
+GROUNDING_NUDGE = (
+    "[grounding check] Your last reply stated lab facts (specimens, stains, instruments or QC) that no tool "
+    "result in this turn supports. If the user asked about lab data, call the right read tool now and answer "
+    "only from its result. If they didn't, reply without stating any lab facts.")
+UNGROUNDED_FALLBACK = "I couldn't confirm that in the LIMS, so I won't guess. Could you ask again?"
+
+
+def grounding_problem(answer: str, evidence: list[str]) -> str | None:
+    """Return why `answer` isn't backed by this turn's tool results, or None if it is.
+
+    Two checks: (1) every accession or instrument ID named in the answer must appear in a tool
+    result from this turn; (2) an answer that states lab facts needs at least one tool result.
+    Facts from earlier turns don't count: lab state changes, so each answer re-reads it."""
+    blob = "\n".join(evidence)
+    missing = sorted({i for i in _IDS.findall(answer) if i not in blob})
+    if missing:
+        return f"names {', '.join(missing)}, which no tool result in this turn contains"
+    if not evidence and _LAB_FACTS.search(answer):
+        return "states lab facts without calling any tool"
+    return None
 
 
 @dataclass
@@ -83,6 +114,8 @@ class Agent:
         trace("user", payload={"text": user_text, "user": user.public() if user else None})
         tools = self.host.openai_tools()
 
+        evidence: list[str] = []         # every tool result text seen this turn
+        nudge: dict[str, str] | None = None  # the one grounding re-prompt, kept out of saved history
         for _step in range(settings.max_agent_steps):
             t0 = time.perf_counter()
             try:
@@ -95,8 +128,20 @@ class Agent:
                   payload={"tool_calls": [c.name for c in reply.tool_calls], "usage": reply.usage})
 
             if not reply.tool_calls:
-                result.answer = reply.content
-                messages.append({"role": "assistant", "content": reply.content})
+                problem = grounding_problem(reply.content, evidence)
+                if problem and nudge is None:
+                    # The model answered about lab data it never looked up. Don't keep that answer;
+                    # tell it what's wrong and give it one chance to check.
+                    trace("grounding_retry", payload={"answer": reply.content, "problem": problem}, ok=False)
+                    nudge = {"role": "system", "content": GROUNDING_NUDGE}
+                    messages.append(nudge)
+                    continue
+                if problem:
+                    trace("grounding_blocked", payload={"answer": reply.content, "problem": problem}, ok=False)
+                    result.answer = UNGROUNDED_FALLBACK
+                else:
+                    result.answer = reply.content
+                messages.append({"role": "assistant", "content": result.answer})
                 break
 
             messages.append({
@@ -111,6 +156,7 @@ class Agent:
             for call in reply.tool_calls:
                 content = await self._handle_call(call.name, call.arguments, session_id, result, trace, user)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
+                evidence.append(content)
 
             if result.pending_actions:
                 # Deterministic, not model-written: the user hears exactly what is awaiting approval.
@@ -121,6 +167,8 @@ class Agent:
             result.answer = "I couldn't finish that within my step limit. Could you narrow the request?"
             messages.append({"role": "assistant", "content": result.answer})
 
+        if nudge is not None:
+            messages.remove(nudge)  # a per-turn correction, not part of the conversation
         self.store.save_messages(session_id, messages)
         result.latency_ms = _ms(t_turn)
         trace("answer", payload=result.answer, latency_ms=result.latency_ms, ok=True)

@@ -67,6 +67,8 @@ def score_case(case: dict[str, Any], res: TurnResult, write_tools: set[str]) -> 
         "llm_ms": sum(e["latency_ms"] or 0 for e in res.trace if e["kind"] == "llm"),
         "llm_calls": sum(1 for e in res.trace if e["kind"] == "llm"),
         "tool_errors": sum(1 for c in res.tool_calls if c["status"] not in ("ok", "pending_approval")),
+        "grounding_retries": sum(1 for e in res.trace if e["kind"] == "grounding_retry"),
+        "grounding_blocked": sum(1 for e in res.trace if e["kind"] == "grounding_blocked"),
         # Full call record (arguments, outcome, attempts) so a failure can be diagnosed from the report.
         "tool_calls": [{k: c.get(k) for k in ("name", "arguments", "status", "attempts")} for c in res.tool_calls],
     }
@@ -95,6 +97,9 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "approval_gate_%": rate("approval_gate"),
         "answer_checks_%": rate("answer"),
         "unsafe_writes": sum(r["unsafe_writes"] for r in rows),
+        # How often the model answered about lab data it hadn't looked up (caught by the guard).
+        "grounding_retries": sum(r.get("grounding_retries", 0) for r in rows),
+        "grounding_blocked": sum(r.get("grounding_blocked", 0) for r in rows),
         "turn_p50_ms": round(statistics.median(lat), 1),
         "turn_p95_ms": round(lat[min(len(lat) - 1, int(0.95 * len(lat)))], 1),
         "avg_llm_calls": round(statistics.mean(r["llm_calls"] for r in rows), 2),

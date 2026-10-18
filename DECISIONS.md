@@ -97,6 +97,16 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Context:** Fixing what the eval set exposes and then re-running the same cases inflates the score.
 - **Decision:** Fixes target *classes* of failure, not individual cases. New cases were written alongside the fixes (multi-hop, spoken numbers, scope, ETA). Cases use `{YY}` instead of a hard-coded year prefix so they keep working next year. For the fine-tune, training data and the reported eval set will be strictly separate.
 
+### D18. A grounding guard, in code
+- **Context:** In the second eval run the model answered "Why isn't 312 ready yet?" **without calling any tool**: "S26-00312 is overdue and blocked by a labeling discrepancy." Fluent, specific, false. The invented details echoed words the system prompt had emphasized (OVERDUE, BLOCKED, FLAGGED).
+- **Decision:** Before an answer is spoken, the host checks it against this turn's tool results: every accession or instrument ID it names must appear in a tool result, and an answer stating lab facts must have at least one. On failure the answer is discarded, the model is told what was wrong and gets one retry; a second failure is replaced with "I couldn't confirm that in the LIMS, so I won't guess." Facts from earlier turns don't count, because lab state changes.
+- **Rejected:** More prompt rules ("never answer without a tool") — the prompt already said "Never guess lab data". An LLM-as-judge check — adds a second model call (~1 s) to every turn, itself unreliable at this size.
+- **Consequences:** Heuristic: it can't catch a wrong *claim* about an ID that the tool did return (e.g. the wrong status), and a non-lab answer containing a lab word may cost one extra round trip. The eval report counts retries and blocks, so the guard's activity is measured, not assumed. Emphasized prompt words were also removed, since they leaked into the confabulation.
+
+### D19. Tell small models where to act, at the parameter
+- **Context:** Two failures came from instructions read too literally: "always say the full accession" made the model ask for the full number instead of acting, and despite "pass it as-is" it rewrote "287" as `S28-0287`.
+- **Decision:** Separate *what to pass* from *what to say* in the prompt, and put input guidance in the tool schema's parameter descriptions, where the model writes the argument. The server also rejects future-year prefixes with a "did you mean" that names the right call.
+
 ---
 
 ## Open questions
@@ -113,3 +123,8 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Cause:** `with sqlite3.connect(...) as c:` commits the transaction but does *not* close the connection. In CPython the connection sits in a reference cycle, so it's only closed when the cyclic GC runs. Linux lets you delete open files; Windows doesn't.
 - **Fix:** One `_conn()` context manager per component that commits/rolls back *and* closes. `tests/test_store.py` disables the GC and checks for open handles (`/proc/self/fd` on Linux, delete-the-file on Windows); it fails on the old code.
 - **Lesson:** Resource lifetimes shouldn't depend on the garbage collector, and CI should include the OS you deploy on.
+
+### B2. The model confabulated a lab status without looking it up
+- **Symptom:** "S26-00312 is overdue and blocked by a labeling discrepancy" — no tool call, every detail wrong. Pass rate still rose that run (81% → 85%), which is exactly why per-case answers have to be read, not just the score.
+- **Fix:** The grounding guard (D18), plus removing emphasized words from the prompt that the confabulation echoed.
+- **Lesson:** Instructions reduce failure rates; checks bound them. Anything that must never happen needs code, not prompt text.
