@@ -26,9 +26,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
+from pydantic import Field
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
@@ -57,6 +58,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS instrument_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, instrument_id TEXT, ts TEXT, change TEXT, actor TEXT);
 """
+
+# Parameter descriptions are part of the tool schema the model reads. Small models follow these
+# more reliably than system-prompt rules, because they sit right where the argument is written.
+Accession = Annotated[str, Field(description=(
+    "The accession exactly as the user said it, e.g. '287', 'S 26 312' or 'S26-00312'. "
+    "Short forms are fine; the server normalizes them. Never add or guess a year prefix."))]
+InstrumentRef = Annotated[str, Field(description=(
+    "The instrument as the user said it, e.g. 'IHC stainer one', 'the H&E stainer' or 'IHC-01'."))]
 
 # Columns the model may see. Patient identifiers are deliberately absent.
 SPECIMEN_COLS = "accession, type, site, priority, status, blocks, received_at, due_at, pathologist, flag"
@@ -120,6 +129,10 @@ def normalize_accession(text: str, year: int | None = None) -> str:
         y, seq = str(yy), groups[0]
     if len(y) != 2 or not seq or len(seq) > 5:
         raise ToolError(f"'{text}' is not an accession number. Expected a form like S{yy:02d}-00312.")
+    if int(y) > yy:
+        # Observed: a small model turned "287" into "S28-0287". A future year can't exist yet.
+        raise ToolError(f"S{y} is a future year, so '{text}' can't exist. Did you mean S{yy:02d}-{int(seq):05d}? "
+                        f"Pass the digits exactly as the user said them (e.g. '{int(seq)}') without a prefix.")
     return f"S{y}-{int(seq):05d}"
 
 
@@ -179,7 +192,7 @@ def _event(c: sqlite3.Connection, accession: str, event: str, actor: str) -> Non
 
 # ------------------------------------------------------------------ reads ---
 @mcp.tool(annotations=READ)
-def get_specimen(accession: str) -> dict[str, Any]:
+def get_specimen(accession: Accession) -> dict[str, Any]:
     """Get one specimen by accession number (e.g. S26-00312): a one-line `headline` to read back,
     workflow status, priority, due time and whether it's overdue, blocks, stain orders (with the
     instrument running each one and that instrument's status), flags and recent history.
@@ -258,7 +271,7 @@ def find_specimens(
 
 
 @mcp.tool(annotations=READ)
-def get_instrument(instrument: str) -> dict[str, Any]:
+def get_instrument(instrument: InstrumentRef) -> dict[str, Any]:
     """Get an instrument's status, note (e.g. repair ETA), last 3 QC runs, and the stains currently
     loaded on it. Pass what the user said: an ID (IHC-01) or a spoken name ("IHC stainer one",
     "the H&E stainer")."""
@@ -298,7 +311,7 @@ def list_instruments(
 
 # ----------------------------------------------------------------- writes ---
 @mcp.tool(annotations=WRITE)
-def order_stain(accession: str, stain: str, block: str = "A1", reason: str | None = None,
+def order_stain(accession: Accession, stain: str, block: str = "A1", reason: str | None = None,
                 dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Order a stain (H&E, special stain, or IHC) on a block of a specimen. Writes to the LIMS;
     held for supervisor approval."""
@@ -332,7 +345,7 @@ def order_stain(accession: str, stain: str, block: str = "A1", reason: str | Non
 
 
 @mcp.tool(annotations=WRITE)
-def flag_specimen(accession: str, reason: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
+def flag_specimen(accession: Accession, reason: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Flag a specimen for a problem (labeling discrepancy, insufficient tissue, etc.).
     Flagged specimens show on the supervisor's worklist. Held for approval."""
     _maybe_fault()
@@ -349,7 +362,7 @@ def flag_specimen(accession: str, reason: str, dry_run: bool = False, actor: str
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
-def set_instrument_status(instrument: str, status: Literal["online", "maintenance", "qc_hold", "offline"],
+def set_instrument_status(instrument: InstrumentRef, status: Literal["online", "maintenance", "qc_hold", "offline"],
                           note: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Change an instrument's status (e.g. put it on QC hold or bring it back online).
     Affects every specimen routed to it. Held for supervisor approval."""
