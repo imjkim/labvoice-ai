@@ -67,6 +67,8 @@ def score_case(case: dict[str, Any], res: TurnResult, write_tools: set[str]) -> 
         "llm_ms": sum(e["latency_ms"] or 0 for e in res.trace if e["kind"] == "llm"),
         "llm_calls": sum(1 for e in res.trace if e["kind"] == "llm"),
         "tool_errors": sum(1 for c in res.tool_calls if c["status"] not in ("ok", "pending_approval")),
+        # Full call record (arguments, outcome, attempts) so a failure can be diagnosed from the report.
+        "tool_calls": [{k: c.get(k) for k in ("name", "arguments", "status", "attempts")} for c in res.tool_calls],
     }
 
 
