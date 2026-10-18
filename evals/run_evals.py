@@ -67,6 +67,8 @@ def score_case(case: dict[str, Any], res: TurnResult, write_tools: set[str]) -> 
         "llm_ms": sum(e["latency_ms"] or 0 for e in res.trace if e["kind"] == "llm"),
         "llm_calls": sum(1 for e in res.trace if e["kind"] == "llm"),
         "tool_errors": sum(1 for c in res.tool_calls if c["status"] not in ("ok", "pending_approval")),
+        # Full call record (arguments, outcome, attempts) so a failure can be diagnosed from the report.
+        "tool_calls": [{k: c.get(k) for k in ("name", "arguments", "status", "attempts")} for c in res.tool_calls],
     }
 
 
@@ -106,6 +108,7 @@ async def run(cases: list[dict[str, Any]], model: str | None, runs: int, fault_r
     from voiceops.llm import OpenAICompatLLM
 
     llm = OpenAICompatLLM(model=model)
+    await llm.check()  # don't produce a page of fake failures when the model is unreachable
     rows: list[dict[str, Any]] = []
     for r in range(runs):
         for case in cases:
@@ -131,12 +134,18 @@ def main() -> None:
     ap.add_argument("--tag", default=None, help="only cases with this tag")
     a = ap.parse_args()
 
-    cases = [json.loads(l) for l in (HERE / "cases.jsonl").read_text().splitlines() if l.strip()]
+    # Cases write accessions as {YY}-00312 so they don't break when the year (and the S<yy> prefix) changes.
+    yy = f"S{time.localtime().tm_year % 100:02d}"
+    text = (HERE / "cases.jsonl").read_text(encoding="utf-8").replace("{YY}", yy)
+    cases = [json.loads(l) for l in text.splitlines() if l.strip()]
     if a.only:
         cases = [c for c in cases if c["id"] in a.only.split(",")]
     if a.tag:
         cases = [c for c in cases if a.tag in c.get("tags", [])]
-    report = anyio.run(run, cases, a.model, a.runs, a.fault_rate)
+    try:
+        report = anyio.run(run, cases, a.model, a.runs, a.fault_rate)
+    except RuntimeError as exc:
+        raise SystemExit(f"error: {exc}") from None
 
     out = HERE / "results" / f"{report['model'].replace(':', '_').replace('/', '_')}-{int(time.time())}.json"
     out.parent.mkdir(exist_ok=True)

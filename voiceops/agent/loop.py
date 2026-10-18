@@ -23,10 +23,11 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from voiceops.agent.store import Store
+from voiceops.agent.store import ActionError, Store
+from voiceops.auth import User, approver_roles, check_decision
 from voiceops.config import settings
 from voiceops.llm import LLM, AssistantMessage
-from voiceops.mcp_host import MCPHost
+from voiceops.mcp_host import HOST_ONLY_PARAMS, MCPHost
 
 _YY = f"S{datetime.now().year % 100:02d}"
 
@@ -34,12 +35,17 @@ SYSTEM_PROMPT = f"""You are VoiceOps, a hands-free assistant for histology lab s
 
 - Use the LIMS tools for anything about specimens, stains, instruments or QC. Never guess lab data.
 - Accession numbers look like {_YY}-00312; staff often say just the last digits ("312"). Pass what they said
-  to the tools as-is (they normalize it), and read the full accession back in your answer.
-- Your replies are spoken aloud: 1-3 short sentences, plain text, no markdown, no lists, no IDs you weren't asked for.
-- When something is delayed, find the cause (e.g. a stain waiting on an instrument that failed QC) before answering.
+  to the tools as-is (they normalize it). In your answer always say the full accession, e.g. {_YY}-00312.
+- get_specimen returns a `headline`: base your answer on it. Always mention if a specimen is OVERDUE,
+  FLAGGED, or BLOCKED, and say what is blocking it.
+- An instrument is down unless its status is online (maintenance, qc_hold and offline are all down).
+- Your replies are spoken aloud: 1-3 short sentences, plain text, no markdown, no lists.
 - Tools that change the LIMS (ordering stains, flagging specimens, changing instrument status) are held for
-  supervisor approval by the system. Never say an action was done unless a tool result confirms it.
+  approval by an authorized person (supervisor, lead tech or pathologist, depending on the action).
+  Never say an action was done unless a tool result confirms it.
 - If a tool returns an error, say briefly what failed. If a request is ambiguous, ask one short question.
+- You don't interpret results or make diagnoses: for clinical questions, say that's the pathologist's call.
+  Politely decline requests unrelated to the lab.
 - You never have patient names or identifiers, and must not ask for them.
 """
 
@@ -62,7 +68,8 @@ class Agent:
     def __init__(self, llm: LLM, host: MCPHost, store: Store, system_prompt: str = SYSTEM_PROMPT):
         self.llm, self.host, self.store, self.system_prompt = llm, host, store, system_prompt
 
-    async def run_turn(self, user_text: str, session_id: str | None = None) -> TurnResult:
+    async def run_turn(self, user_text: str, session_id: str | None = None,
+                       user: User | None = None) -> TurnResult:
         session_id = session_id or str(uuid.uuid4())
         turn_id = str(uuid.uuid4())[:8]
         t_turn = time.perf_counter()
@@ -73,7 +80,7 @@ class Agent:
 
         messages = self.store.load_messages(session_id) or [{"role": "system", "content": self.system_prompt}]
         messages.append({"role": "user", "content": user_text})
-        trace("user", payload=user_text)
+        trace("user", payload={"text": user_text, "user": user.public() if user else None})
         tools = self.host.openai_tools()
 
         for _step in range(settings.max_agent_steps):
@@ -102,7 +109,7 @@ class Agent:
             })
             # Every tool_call id must get a tool message back, or the next request is invalid.
             for call in reply.tool_calls:
-                content = await self._handle_call(call.name, call.arguments, session_id, result, trace)
+                content = await self._handle_call(call.name, call.arguments, session_id, result, trace, user)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
 
             if result.pending_actions:
@@ -119,7 +126,8 @@ class Agent:
         trace("answer", payload=result.answer, latency_ms=result.latency_ms, ok=True)
         return result
 
-    async def _handle_call(self, name: str, raw_args: str, session_id: str, result: TurnResult, trace) -> str:
+    async def _handle_call(self, name: str, raw_args: str, session_id: str, result: TurnResult, trace,
+                           user: User | None = None) -> str:
         record: dict[str, Any] = {"name": name, "arguments": raw_args, "status": None}
         result.tool_calls.append(record)
 
@@ -137,6 +145,8 @@ class Agent:
             record["status"] = "invalid_args"
             trace("tool", name=name, payload={"error": f"bad JSON: {exc}"}, ok=False)
             return json.dumps({"error": f"Arguments were not valid JSON: {exc}"})
+        for param in HOST_ONLY_PARAMS & set(args):
+            args.pop(param)  # dry_run / actor are the host's to set, never the model's
         record["arguments"] = args
 
         errors = sorted(Draft202012Validator(tool.input_schema).iter_errors(args), key=str)
@@ -147,7 +157,6 @@ class Agent:
             return json.dumps({"error": f"Invalid arguments: {msg}"})
 
         if not tool.read_only:
-            args.pop("dry_run", None)  # host-only control; the model never decides this
             preview = None
             if tool.trusted and tool.supports_dry_run:
                 # Preflight: full server-side validation, no write. Humans only approve valid actions.
@@ -158,12 +167,14 @@ class Agent:
                     record["status"] = "rejected_preflight"
                     return json.dumps({"error": f"Not submitted for approval: {check.error}"})
                 preview = check.data
-            action = self.store.create_action(session_id, name, args, preview)
+            action = self.store.create_action(session_id, name, args, preview,
+                                              requested_by=user.id if user else None,
+                                              approvers=sorted(approver_roles(name)))
             record["status"] = "pending_approval"
             result.pending_actions.append(action.public())
             trace("approval_requested", name=name, payload=action.public(), ok=True)
             return json.dumps({"status": "pending_approval", "action_id": action.id, "preview": preview,
-                               "note": "NOT executed. Waiting for a supervisor to approve."})
+                               "note": "NOT executed. Waiting for approval by: " + ", ".join(action.approvers or [])})
 
         outcome = await self.host.call(name, args)
         record["status"] = "ok" if outcome.ok else "error"
@@ -172,35 +183,59 @@ class Agent:
               payload={"args": args, "attempts": outcome.attempts, "error": outcome.error})
         return outcome.for_model()
 
-    async def resolve_action(self, action_id: str, approve: bool, by: str = "local-user") -> dict[str, Any]:
-        """Human decision on a pending action. Executes the exact stored payload, at most once."""
-        action = self.store.claim_action(action_id, "approved" if approve else "denied", by,
+    async def resolve_action(self, action_id: str, approve: bool, by: User) -> dict[str, Any]:
+        """A human decision on a pending action. Authorization is checked BEFORE the action is
+        claimed, so an unauthorized attempt can't consume it. Executes the exact stored payload,
+        at most once, with the approver recorded in the system of record."""
+        action = self.store.load_action(action_id)
+        if action is None:
+            raise ActionError("action not found")
+        reason = check_decision(action.tool, action.requested_by, by, approve)
+        if reason:
+            self.store.trace(action.session_id, "approval", "approval_forbidden", name=action.tool,
+                             payload={"action_id": action.id, "by": by.public(), "approve": approve, "reason": reason},
+                             ok=False)
+            raise ActionForbidden(reason)
+
+        action = self.store.claim_action(action_id, "approved" if approve else "denied", by.id,
                                          settings.approval_ttl_s)
         turn_id = "approval"
         if not approve:
-            self.store.finish_action(action.id, "denied", None)
-            self.store.trace(action.session_id, turn_id, "approval_denied", name=action.tool, payload=action.public())
-            note = f"The user denied {action.tool} ({action.id[:8]}); it was not executed."
+            withdrawn = by.id == action.requested_by
+            self.store.finish_action(action.id, "denied", {"withdrawn": withdrawn})
+            self.store.trace(action.session_id, turn_id, "approval_denied", name=action.tool,
+                             payload={**action.public(), "by": by.public(), "withdrawn": withdrawn})
+            verb = "withdrew" if withdrawn else "denied"
+            note = f"{by.name} {verb} {action.tool} ({action.id[:8]}); it was not executed."
             status, data = "denied", None
         else:
-            # Writes are never auto-retried: a timeout may still have committed.
             tool = self.host.tools[action.tool]
-            args = {**action.args, "dry_run": False} if tool.supports_dry_run else action.args
+            args = dict(action.args)
+            if tool.supports_dry_run:
+                args["dry_run"] = False
+            if tool.accepts("actor"):
+                args["actor"] = f"{by.name} ({by.role})"  # lands in the LIMS audit trail
+            # Writes are never auto-retried: a timeout may still have committed.
             outcome = await self.host.call(action.tool, args, allow_retry=False)
             status = "executed" if outcome.ok else "failed"
             data = outcome.data if outcome.ok else {"error": outcome.error}
             self.store.finish_action(action.id, status, data)
             self.store.trace(action.session_id, turn_id, "approval_executed", name=action.tool,
-                             payload={"action_id": action.id, "result": data},
+                             payload={"action_id": action.id, "by": by.public(), "result": data},
                              latency_ms=outcome.latency_ms, ok=outcome.ok)
-            note = f"Approved {action.tool} ({action.id[:8]}) {status}: {json.dumps(data, default=str)}"
+            note = f"{by.name} approved {action.tool} ({action.id[:8]}), {status}: {json.dumps(data, default=str)}"
 
         # Record the outcome in the conversation so later turns know what happened.
         messages = self.store.load_messages(action.session_id)
         if messages:
             messages.append({"role": "assistant", "content": f"[system note] {note}"})
             self.store.save_messages(action.session_id, messages)
-        return {"action_id": action.id, "tool": action.tool, "status": status, "result": data}
+        return {"action_id": action.id, "tool": action.tool, "status": status, "result": data,
+                "decided_by": by.public()}
+
+
+class ActionForbidden(ActionError):
+    """The user may not make this decision on this action."""
 
 
 def _describe_pending(a: dict[str, Any]) -> str:
@@ -212,7 +247,9 @@ def _describe_pending(a: dict[str, Any]) -> str:
     else:
         args = ", ".join(f"{k} {v}" for k, v in a["args"].items() if v is not None)
         what = f"run {a['tool'].split('__')[-1].replace('_', ' ')} with {args}"
-    text = f"Ready to {what}. It needs supervisor approval before it runs."
+    roles = a.get("approvers") or ["supervisor"]
+    who = " or ".join(r.replace("_", " ") for r in roles)
+    text = f"Ready to {what}. It needs approval from a {who} before it runs."
     return f"{text} Note: {preview['warning']}." if preview.get("warning") else text
 
 

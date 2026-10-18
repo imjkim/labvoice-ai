@@ -65,3 +65,41 @@ def test_validation_errors_are_actionable():
                 ambiguous = await host.call("lims__get_instrument", {"instrument": "IHC stainer"})
                 assert "IHC-01" in ambiguous.error and "IHC-02" in ambiguous.error
     anyio.run(main)
+
+
+def test_spoken_instrument_names_resolve():
+    async def main():
+        with tempfile.TemporaryDirectory() as d:
+            async with MCPHost(default_servers(str(Path(d) / "lims.db"))) as host:
+                for spoken, expected in [("IHC stainer one", "IHC-01"), ("ihc 1", "IHC-01"), ("IHC-02", "IHC-02"),
+                                         ("the H&E stainer", "HE-01"), ("tissue processor two", "TP-02")]:
+                    out = await host.call("lims__get_instrument", {"instrument": spoken})
+                    assert out.ok and out.data["id"] == expected, (spoken, out.error)
+    anyio.run(main)
+
+
+def test_headline_surfaces_blockers_overdue_and_flags():
+    async def main():
+        with tempfile.TemporaryDirectory() as d:
+            async with MCPHost(default_servers(str(Path(d) / "lims.db"))) as host:
+                star = (await host.call("lims__get_specimen", {"accession": "312"})).data
+                assert star["headline"].startswith("S26-00312:")
+                assert "HER2" in star["headline"] and "IHC-01" in star["headline"] and "BLOCKED" in star["headline"]
+                her2 = next(o for o in star["stain_orders"] if o["stain"] == "HER2")
+                assert her2["instrument_status"] == "qc_hold"
+                late = (await host.call("lims__get_specimen", {"accession": "287"})).data
+                assert late["overdue"] and "OVERDUE" in late["headline"]
+                flagged = (await host.call("lims__get_specimen", {"accession": "330"})).data
+                assert "FLAGGED" in flagged["headline"]
+    anyio.run(main)
+
+
+def test_down_means_any_status_other_than_online():
+    async def main():
+        with tempfile.TemporaryDirectory() as d:
+            async with MCPHost(default_servers(str(Path(d) / "lims.db"))) as host:
+                down = (await host.call("lims__list_instruments", {"available": False})).data
+                assert set(down["down"]) == {"HE-01", "IHC-01"}  # maintenance + qc_hold, neither is 'offline'
+                everything = (await host.call("lims__list_instruments", {})).data
+                assert set(everything["down"]) == {"HE-01", "IHC-01"} and everything["count"] == 9
+    anyio.run(main)

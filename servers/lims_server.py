@@ -13,6 +13,8 @@ Design rules (see DECISIONS.md):
   sends anything not read-only through human approval.
 - Every write tool supports dry_run: full validation plus a preview, no write.
   The host preflights with it so humans only ever approve valid actions.
+- Every write tool takes `actor`, set by the host to the approving human, so the
+  LIMS audit trail says who approved each change. The model never sees either.
 """
 from __future__ import annotations
 
@@ -52,6 +54,8 @@ CREATE TABLE IF NOT EXISTS qc_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, instrument_id TEXT, run_at TEXT, result TEXT, notes TEXT, performed_by TEXT);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, accession TEXT, ts TEXT, event TEXT, actor TEXT);
+CREATE TABLE IF NOT EXISTS instrument_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, instrument_id TEXT, ts TEXT, change TEXT, actor TEXT);
 """
 
 # Columns the model may see. Patient identifiers are deliberately absent.
@@ -127,15 +131,33 @@ def _specimen(c: sqlite3.Connection, accession: str) -> dict[str, Any]:
     return dict(row)
 
 
+_NUMBER_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+                 "six": "6", "seven": "7", "eight": "8", "nine": "9", "first": "1", "second": "2"}
+
+
+def _spoken_key(text: str) -> str:
+    """'IHC stainer one' -> 'ihcstainer1'; 'IHC-01' -> 'ihc01'. Voice input says numbers as words."""
+    words = [w for w in re.findall(r"[a-z0-9&]+", text.lower()) if w not in ("the", "a", "an", "number", "no")]
+    return "".join(_NUMBER_WORDS.get(w, w) for w in words).replace("&", "")
+
+
 def _instrument(c: sqlite3.Connection, ref: str) -> dict[str, Any]:
-    """Match 'IHC-01', 'ihc01', or a name fragment like 'H&E stainer'. Ambiguity is an error."""
-    key = re.sub(r"[^a-z0-9]", "", ref.lower())
+    """Match an ID ('IHC-01', 'ihc 1'), a spoken name ('IHC stainer one'), or a name fragment
+    ('H&E stainer'). Ambiguity is an error that lists the options."""
     rows = [dict(r) for r in c.execute("SELECT * FROM instruments")]
-    hits = [r for r in rows if re.sub(r"[^a-z0-9]", "", r["id"].lower()) == key]
+    key = _spoken_key(ref)
+
+    def id_key(iid: str) -> str:  # 'IHC-01' -> 'ihc1' so 'ihc 1' and 'ihc01' both match
+        m = re.fullmatch(r"([a-z]+)0*(\d+)", re.sub(r"[^a-z0-9]", "", iid.lower()))
+        return f"{m.group(1)}{m.group(2)}" if m else iid.lower()
+
+    loose = re.sub(r"^([a-z]+)0*(\d+)$", r"\1\2", key)
+    hits = [r for r in rows if id_key(r["id"]) == loose] or \
+           [r for r in rows if _spoken_key(r["name"]) == key] or \
+           [r for r in rows if key and (key in _spoken_key(r["name"]) or key in _spoken_key(r["type"]))]
     if not hits:
-        hits = [r for r in rows if ref.lower() in r["name"].lower() or ref.lower().replace(" ", "_") in r["type"]]
-    if not hits:
-        raise ToolError(f"No instrument matches '{ref}'. Known: {', '.join(r['id'] for r in rows)}")
+        known = ", ".join(f"{r['id']} ({r['name']})" for r in rows)
+        raise ToolError(f"No instrument matches '{ref}'. Known: {known}")
     if len(hits) > 1:
         options = ", ".join(f"{r['id']} ({r['name']})" for r in hits)
         raise ToolError(f"'{ref}' is ambiguous: {options}")
@@ -146,28 +168,63 @@ def _block_labels(n: int) -> list[str]:
     return [f"A{i}" for i in range(1, n + 1)]
 
 
-def _event(c: sqlite3.Connection, accession: str, event: str, actor: str = "VoiceOps (approved)") -> None:
+def _actor(actor: str | None) -> str:
+    """Audit-trail attribution for a write: the approving human, via VoiceOps."""
+    return f"{actor} via VoiceOps" if actor else "VoiceOps (unattributed)"
+
+
+def _event(c: sqlite3.Connection, accession: str, event: str, actor: str) -> None:
     c.execute("INSERT INTO events (accession, ts, event, actor) VALUES (?, ?, ?, ?)", (accession, _now(), event, actor))
 
 
 # ------------------------------------------------------------------ reads ---
 @mcp.tool(annotations=READ)
 def get_specimen(accession: str) -> dict[str, Any]:
-    """Get one specimen by accession number (e.g. S26-00312): workflow status, priority,
-    due time, blocks, stain orders (with the instrument running them), flags and recent history.
+    """Get one specimen by accession number (e.g. S26-00312): a one-line `headline` to read back,
+    workflow status, priority, due time and whether it's overdue, blocks, stain orders (with the
+    instrument running each one and that instrument's status), flags and recent history.
     Patient identifiers are never returned."""
     _maybe_fault()
     with _conn() as c:
         spec = _specimen(c, accession)
-        spec["overdue"] = spec["status"] != "signed_out" and spec["due_at"] < _now()
+        now = datetime.now(timezone.utc)
+        due = datetime.fromisoformat(spec["due_at"])
+        spec["overdue"] = spec["status"] != "signed_out" and due < now
+        spec["overdue_hours"] = round((now - due).total_seconds() / 3600) if spec["overdue"] else 0
         spec["block_labels"] = _block_labels(spec["blocks"])
         spec["stain_orders"] = [dict(r) for r in c.execute(
-            "SELECT block, stain, status, instrument_id, ordered_at, ordered_by FROM stain_orders "
-            "WHERE accession = ? ORDER BY id", (spec["accession"],))]
+            "SELECT o.block, o.stain, o.status, o.instrument_id, i.status AS instrument_status, "
+            "i.note AS instrument_note, o.ordered_at, o.ordered_by "
+            "FROM stain_orders o LEFT JOIN instruments i ON i.id = o.instrument_id "
+            "WHERE o.accession = ? ORDER BY o.id", (spec["accession"],))]
         spec["recent_events"] = [dict(r) for r in c.execute(
             "SELECT ts, event, actor FROM events WHERE accession = ? ORDER BY ts DESC, id DESC LIMIT 5",
             (spec["accession"],))]
+    spec["headline"] = _headline(spec)
     return spec
+
+
+def _headline(spec: dict[str, Any]) -> str:
+    """A precomputed, speakable summary. Small models reliably repeat a good headline; they
+    are much less reliable at assembling one from nested JSON."""
+    parts = [f"{spec['accession']}: {spec['priority']} {spec['site']} {spec['type']}, "
+             f"{spec['status'].replace('_', ' ')}"]
+    if spec["overdue"]:
+        parts.append(f"OVERDUE by {spec['overdue_hours']} hours")
+    if spec["pathologist"]:
+        parts.append(spec["pathologist"])
+    for o in spec["stain_orders"]:
+        if o["status"] != "complete":
+            line = f"{o['stain']} on {o['block']} {o['status'].replace('_', ' ')}"
+            if o["instrument_id"]:
+                line += f" on {o['instrument_id']}"
+                if o["instrument_status"] and o["instrument_status"] != "online":
+                    line += (f", which is BLOCKED ({o['instrument_status'].replace('_', ' ')}"
+                             + (f": {o['instrument_note']}" if o["instrument_note"] else "") + ")")
+            parts.append(line)
+    if spec["flag"]:
+        parts.append(f"FLAGGED: {spec['flag']}")
+    return "; ".join(parts) + "."
 
 
 @mcp.tool(annotations=READ)
@@ -202,8 +259,9 @@ def find_specimens(
 
 @mcp.tool(annotations=READ)
 def get_instrument(instrument: str) -> dict[str, Any]:
-    """Get an instrument's status, note, last 3 QC runs, and the stains currently loaded on it.
-    Accepts an ID (IHC-01) or a name (\"H&E stainer\")."""
+    """Get an instrument's status, note (e.g. repair ETA), last 3 QC runs, and the stains currently
+    loaded on it. Pass what the user said: an ID (IHC-01) or a spoken name ("IHC stainer one",
+    "the H&E stainer")."""
     _maybe_fault()
     with _conn() as c:
         inst = _instrument(c, instrument)
@@ -217,21 +275,31 @@ def get_instrument(instrument: str) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=READ)
-def list_instruments(status: Literal["online", "maintenance", "qc_hold", "offline"] | None = None) -> dict[str, Any]:
-    """List lab instruments and their status, optionally only those with a given status."""
+def list_instruments(
+    available: bool | None = None,
+    status: Literal["online", "maintenance", "qc_hold", "offline"] | None = None,
+) -> dict[str, Any]:
+    """List lab instruments and their status. An instrument is available only when its status is
+    'online'; 'maintenance', 'qc_hold' and 'offline' all mean it is DOWN / unavailable.
+    Use available=false to find everything that is down; available=true for what's usable."""
     _maybe_fault()
     with _conn() as c:
-        sql, args = "SELECT id, name, type, status, note FROM instruments", []
+        sql, args, where = "SELECT id, name, type, status, note FROM instruments", [], []
+        if available is not None:
+            where.append("status = 'online'" if available else "status != 'online'")
         if status:
-            sql += " WHERE status = ?"; args.append(status)
-        rows = [dict(r) for r in c.execute(sql + " ORDER BY id", args)]
-    return {"count": len(rows), "instruments": rows}
+            where.append("status = ?"); args.append(status)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        rows = [{**dict(r), "available": r["status"] == "online"} for r in c.execute(sql + " ORDER BY id", args)]
+    down = [r["id"] for r in rows if not r["available"]]
+    return {"count": len(rows), "down": down, "instruments": rows}
 
 
 # ----------------------------------------------------------------- writes ---
 @mcp.tool(annotations=WRITE)
 def order_stain(accession: str, stain: str, block: str = "A1", reason: str | None = None,
-                dry_run: bool = False) -> dict[str, Any]:
+                dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Order a stain (H&E, special stain, or IHC) on a block of a specimen. Writes to the LIMS;
     held for supervisor approval."""
     _maybe_fault()
@@ -255,15 +323,16 @@ def order_stain(accession: str, stain: str, block: str = "A1", reason: str | Non
             return {"dry_run": True, "summary": f"order {canonical} on {spec['accession']} block {block}", **preview}
         cur = c.execute(
             "INSERT INTO stain_orders (accession, block, stain, status, instrument_id, ordered_at, ordered_by, reason) "
-            "VALUES (?, ?, ?, 'ordered', NULL, ?, 'VoiceOps (approved)', ?)",
-            (spec["accession"], block, canonical, _now(), reason))
-        _event(c, spec["accession"], f"stain ordered: {canonical} on {block}" + (f" ({reason})" if reason else ""))
+            "VALUES (?, ?, ?, 'ordered', NULL, ?, ?, ?)",
+            (spec["accession"], block, canonical, _now(), _actor(actor), reason))
+        _event(c, spec["accession"], f"stain ordered: {canonical} on {block}" + (f" ({reason})" if reason else ""),
+               _actor(actor))
     return {"order_id": cur.lastrowid, "accession": spec["accession"], "block": block, "stain": canonical,
             "status": "ordered"}
 
 
 @mcp.tool(annotations=WRITE)
-def flag_specimen(accession: str, reason: str, dry_run: bool = False) -> dict[str, Any]:
+def flag_specimen(accession: str, reason: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Flag a specimen for a problem (labeling discrepancy, insufficient tissue, etc.).
     Flagged specimens show on the supervisor's worklist. Held for approval."""
     _maybe_fault()
@@ -275,13 +344,13 @@ def flag_specimen(accession: str, reason: str, dry_run: bool = False) -> dict[st
             return {"dry_run": True, "summary": f"flag {spec['accession']}: {reason.strip()}", "accession": spec["accession"],
                     "reason": reason.strip(), "replaces_flag": spec["flag"]}
         c.execute("UPDATE specimens SET flag = ? WHERE accession = ?", (reason.strip(), spec["accession"]))
-        _event(c, spec["accession"], f"flagged: {reason.strip()}")
+        _event(c, spec["accession"], f"flagged: {reason.strip()}", _actor(actor))
     return {"accession": spec["accession"], "flag": reason.strip()}
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
 def set_instrument_status(instrument: str, status: Literal["online", "maintenance", "qc_hold", "offline"],
-                          note: str, dry_run: bool = False) -> dict[str, Any]:
+                          note: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Change an instrument's status (e.g. put it on QC hold or bring it back online).
     Affects every specimen routed to it. Held for supervisor approval."""
     _maybe_fault()
@@ -300,6 +369,8 @@ def set_instrument_status(instrument: str, status: Literal["online", "maintenanc
                     "instrument": inst["id"],
                     "from": inst["status"], "to": status, "in_progress_stains_affected": affected}
         c.execute("UPDATE instruments SET status = ?, note = ? WHERE id = ?", (status, note, inst["id"]))
+        c.execute("INSERT INTO instrument_log (instrument_id, ts, change, actor) VALUES (?, ?, ?, ?)",
+                  (inst["id"], _now(), f"{inst['status']} -> {status}: {note}", _actor(actor)))
     return {"instrument": inst["id"], "previous_status": inst["status"], "status": status, "note": note}
 
 

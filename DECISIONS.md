@@ -66,10 +66,40 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Decision:** A seeded generator for realistic volume, plus a few fixed scenarios (e.g. `S26-00312` blocked by a failed-QC IHC stainer) that demos and evals depend on.
 - **Consequences:** Reproducible demos and evals; timestamps are relative to "now", so the lab always looks live.
 
+### D12. Role-based approvals with four eyes
+- **Context:** "A human approved it" isn't enough in a lab. Pathologists own stain orders; only supervisors should change instrument status; nobody should approve their own request.
+- **Decision:** A per-tool policy (`voiceops/auth.py`) lists the roles that may approve each write tool. Unlisted tools (new ones, third-party servers) default to the most senior role. Approval also requires a different person from the requester. Requesters may withdraw their own requests. The allowed roles are stored on the action when it's created, and the spoken confirmation names them.
+- **Authorization happens before the action is claimed,** so an unauthorized attempt can't consume or block it, and it's written to the trace as `approval_forbidden`.
+- **Rejected:** Roles enforced only in the UI (bypassable), and role checks inside the MCP server (the server shouldn't need to know the agent's org chart, and third-party servers can't be trusted to check).
+
+### D13. Identity is a demo header, deliberately
+- **Decision:** The API identifies users by an `X-User` header against a small demo directory. That's enough to demonstrate and test the policy.
+- **Consequences:** Not authentication. A real deployment takes identity from the lab's SSO (OIDC/SAML) and roles from its directory; the policy and enforcement points stay the same.
+
+### D14. The approver is written into the system of record
+- **Context:** A LIMS audit trail that says "VoiceOps did it" is useless to a lab director or an inspector.
+- **Decision:** Write tools take an `actor` parameter that only the host sets (hidden from the model's schema and stripped from model arguments, like `dry_run`). On execution the host passes the approving human, and the LIMS records "Dr. Carmen Ruiz (pathologist) via VoiceOps" on the event, the stain order, and the instrument log.
+- **Consequences:** The model can't forge attribution (tested).
+
+### D15. A non-thinking model for the voice path
+- **Context:** On Ollama, `qwen3:4b` is the *thinking* build: it reasons at length before every answer, ~40 s per turn on an RTX 3060. Voice needs a reply in about 2 s.
+- **Decision:** Default to `qwen3:4b-instruct` (same family and size, no thinking). First baseline: 81% pass, p50 1.8 s, p95 3.6 s, 0 unsafe writes.
+- **Rejected:** Switching thinking off through Ollama's OpenAI-compatible endpoint. Reports show `think`/`reasoning_effort` there either don't reach the model or barely shorten the reasoning; changing the model is deterministic.
+- **Consequences:** Any accuracy the thinking model has over instruct is out of reach within the latency budget. Closing that gap is what the Phase 3 fine-tune is for.
+
+### D16. Design tools for the model you have
+- **Context:** In the first baseline, 3 of 4 failures traced to tool design, not model ability: no status value meant "down", spoken numbers ("stainer one") didn't resolve, and the blocker behind a late specimen took a second call the model didn't make.
+- **Decision:** Make the tools carry the reasoning a small model is bad at: explicit semantics (`available`, a `down` list), tolerant inputs (spoken numbers and filler words), joined context (each stain order carries its instrument's status), and a precomputed `headline` the model can read back.
+- **Rejected:** Prompt patches per failure. They're brittle, cost tokens every turn, and don't transfer to the next model.
+- **Consequences:** The remaining failures are closer to real reasoning gaps, which is the right target for fine-tuning.
+
+### D17. Don't tune against the test you report
+- **Context:** Fixing what the eval set exposes and then re-running the same cases inflates the score.
+- **Decision:** Fixes target *classes* of failure, not individual cases. New cases were written alongside the fixes (multi-hop, spoken numbers, scope, ETA). Cases use `{YY}` instead of a hard-coded year prefix so they keep working next year. For the fine-tune, training data and the reported eval set will be strictly separate.
+
 ---
 
 ## Open questions
-- Roles: who may approve what (tech vs supervisor vs pathologist)? Where does approver identity reach the LIMS audit trail?
 - Redacting PHI from STT transcripts before traces are written.
 - Structured transient-error signaling from MCP servers instead of a regex.
 - Voice framework (Pipecat / LiveKit Agents) vs hand-rolled streaming + barge-in. Decide with latency numbers, not taste.
