@@ -59,13 +59,18 @@ CREATE TABLE IF NOT EXISTS instrument_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, instrument_id TEXT, ts TEXT, change TEXT, actor TEXT);
 """
 
-# Parameter descriptions are part of the tool schema the model reads. Small models follow these
-# more reliably than system-prompt rules, because they sit right where the argument is written.
+# Parameter descriptions are part of the tool schema the model reads. Their examples must NOT be
+# real lab entities: a model will reuse an example as an argument (observed: it looked up
+# 'IHC stainer one' unprompted because that was the example). tests/test_lims_server.py enforces this.
+# Small models follow these more reliably than system-prompt rules, because they sit right where
+# the argument is written.
 Accession = Annotated[str, Field(description=(
-    "The accession exactly as the user said it, e.g. '287', 'S 26 312' or 'S26-00312'. "
+    "The accession exactly as the user said it, e.g. '4821' or 'S 26 4821' (examples only). "
     "Short forms are fine; the server normalizes them. Never add or guess a year prefix."))]
 InstrumentRef = Annotated[str, Field(description=(
-    "The instrument as the user said it, e.g. 'IHC stainer one', 'the H&E stainer' or 'IHC-01'."))]
+    "The instrument as the user said it: an ID or a spoken name, numbers as words are fine, "
+    "e.g. 'microtome three' or 'MT-07' (examples only). Only pass an instrument the user named "
+    "or a tool result mentioned."))]
 
 # Columns the model may see. Patient identifiers are deliberately absent.
 SPECIMEN_COLS = "accession, type, site, priority, status, blocks, received_at, due_at, pathologist, flag"
@@ -193,7 +198,7 @@ def _event(c: sqlite3.Connection, accession: str, event: str, actor: str) -> Non
 # ------------------------------------------------------------------ reads ---
 @mcp.tool(annotations=READ)
 def get_specimen(accession: Accession) -> dict[str, Any]:
-    """Get one specimen by accession number (e.g. S26-00312): a one-line `headline` to read back,
+    """Get one specimen by accession number: a one-line `headline` to read back,
     workflow status, priority, due time and whether it's overdue, blocks, stain orders (with the
     instrument running each one and that instrument's status), flags and recent history.
     Patient identifiers are never returned."""
@@ -273,8 +278,7 @@ def find_specimens(
 @mcp.tool(annotations=READ)
 def get_instrument(instrument: InstrumentRef) -> dict[str, Any]:
     """Get an instrument's status, note (e.g. repair ETA), last 3 QC runs, and the stains currently
-    loaded on it. Pass what the user said: an ID (IHC-01) or a spoken name ("IHC stainer one",
-    "the H&E stainer")."""
+    loaded on it. Pass the instrument as the user said it (an ID or a spoken name)."""
     _maybe_fault()
     with _conn() as c:
         inst = _instrument(c, instrument)

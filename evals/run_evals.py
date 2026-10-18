@@ -52,7 +52,9 @@ def score_case(case: dict[str, Any], res: TurnResult, write_tools: set[str]) -> 
 
     answer = res.answer.lower()
     if case.get("answer_must_include"):
-        checks["answer"] = all(s.lower() in answer for s in case["answer_must_include"])
+        # Each entry may list acceptable phrasings separated by "|": "fail|did not pass" means either.
+        checks["answer"] = all(any(alt.lower() in answer for alt in s.split("|"))
+                               for s in case["answer_must_include"])
     if case.get("answer_must_not_include"):
         checks["answer"] = checks.get("answer", True) and not any(
             s.lower() in answer for s in case["answer_must_not_include"])

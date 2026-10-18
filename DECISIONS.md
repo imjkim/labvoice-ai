@@ -95,7 +95,7 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 
 ### D17. Don't tune against the test you report
 - **Context:** Fixing what the eval set exposes and then re-running the same cases inflates the score.
-- **Decision:** Fixes target *classes* of failure, not individual cases. New cases were written alongside the fixes (multi-hop, spoken numbers, scope, ETA). Cases use `{YY}` instead of a hard-coded year prefix so they keep working next year. For the fine-tune, training data and the reported eval set will be strictly separate.
+- **Decision:** Fixes target *classes* of failure, not individual cases. New cases were written alongside the fixes (multi-hop, spoken numbers, scope, ETA). Cases use `{YY}` instead of a hard-coded year prefix so they keep working next year. For the fine-tune, training data and the reported eval set will be strictly separate. Scorer fixes are allowed only for measurement errors (a correct answer marked wrong), and are disclosed in the commit and the results history: e.g. `instrument-qc` was failing "did not pass QC" because the check required the word "fail".
 
 ### D18. A grounding guard, in code
 - **Context:** In the second eval run the model answered "Why isn't 312 ready yet?" **without calling any tool**: "S26-00312 is overdue and blocked by a labeling discrepancy." Fluent, specific, false. The invented details echoed words the system prompt had emphasized (OVERDUE, BLOCKED, FLAGGED).
@@ -128,3 +128,9 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Symptom:** "S26-00312 is overdue and blocked by a labeling discrepancy" — no tool call, every detail wrong. Pass rate still rose that run (81% → 85%), which is exactly why per-case answers have to be read, not just the score.
 - **Fix:** The grounding guard (D18), plus removing emphasized words from the prompt that the confabulation echoed.
 - **Lesson:** Instructions reduce failure rates; checks bound them. Anything that must never happen needs code, not prompt text.
+
+### B3. The model reused a schema example as an argument, and stitched true facts into a false claim
+- **Symptom:** Asked "Are any STAT cases stuck because of an instrument problem?", the model looked up `S26-00271`, then called `get_instrument("IHC stainer one")` with no reason from the user, and answered "S26-00271 is stuck because IHC stainer one is on qc_hold." Both facts were real lookups; the link between them was invented (271 has no stain on that instrument).
+- **Cause:** `'IHC stainer one'` was the example in the instrument parameter's description. Every example in the prompt and tool schemas was a real specimen or instrument.
+- **Fix:** Examples now use entities that don't exist (`'4821'`, `'microtome three'`, `'MT-07'`), the prompt says to look up only what the user or a tool result named, and a test fails if any quoted example or ID in model-visible text resolves to a real entity (it catches 17 leaks in the old text). The grounding guard (D18) passed this answer because every ID was real: it checks entities, not relationships, as documented. Relationship-level errors remain an open problem and a fine-tuning target.
+- **Lesson:** Everything in the model's context is a suggestion, examples most of all.
