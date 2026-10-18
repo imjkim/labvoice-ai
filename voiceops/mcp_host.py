@@ -22,6 +22,10 @@ from voiceops.config import ROOT, ServerSpec, settings
 # Tool-level errors worth retrying. "Customer not found" is not; a timeout is.
 TRANSIENT = re.compile(r"timeout|timed out|temporar|unavailable|rate.?limit|\b50[234]\b", re.I)
 
+# Parameters only the host may set. They are hidden from the model's schema and stripped
+# from its arguments: dry_run (preflight) and actor (the approver, for the audit trail).
+HOST_ONLY_PARAMS = frozenset({"dry_run", "actor"})
+
 SEP = "__"  # qualified tool name: <server>__<tool>  (valid OpenAI function name chars)
 
 
@@ -43,15 +47,21 @@ class HostedTool:
         """Honor read_only_hint only from trusted servers. Missing hint => not read-only."""
         return bool(self.trusted and self.annotations and self.annotations.read_only_hint is True)
 
+    def accepts(self, param: str) -> bool:
+        return param in (self.input_schema or {}).get("properties", {})
+
     @property
     def supports_dry_run(self) -> bool:
-        return "dry_run" in (self.input_schema or {}).get("properties", {})
+        return self.accepts("dry_run")
 
     def model_schema(self) -> dict[str, Any]:
-        """The schema the model sees. dry_run is a host-only control, so it is hidden."""
+        """The schema the model sees: host-only parameters are hidden."""
         schema = dict(self.input_schema or {"type": "object", "properties": {}})
-        if self.supports_dry_run:
-            schema["properties"] = {k: v for k, v in schema["properties"].items() if k != "dry_run"}
+        props = schema.get("properties", {})
+        if HOST_ONLY_PARAMS & set(props):
+            schema["properties"] = {k: v for k, v in props.items() if k not in HOST_ONLY_PARAMS}
+            if "required" in schema:
+                schema["required"] = [r for r in schema["required"] if r not in HOST_ONLY_PARAMS]
         return schema
 
     def openai_schema(self) -> dict[str, Any]:

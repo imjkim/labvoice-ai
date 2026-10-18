@@ -13,6 +13,8 @@ Design rules (see DECISIONS.md):
   sends anything not read-only through human approval.
 - Every write tool supports dry_run: full validation plus a preview, no write.
   The host preflights with it so humans only ever approve valid actions.
+- Every write tool takes `actor`, set by the host to the approving human, so the
+  LIMS audit trail says who approved each change. The model never sees either.
 """
 from __future__ import annotations
 
@@ -52,6 +54,8 @@ CREATE TABLE IF NOT EXISTS qc_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, instrument_id TEXT, run_at TEXT, result TEXT, notes TEXT, performed_by TEXT);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, accession TEXT, ts TEXT, event TEXT, actor TEXT);
+CREATE TABLE IF NOT EXISTS instrument_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, instrument_id TEXT, ts TEXT, change TEXT, actor TEXT);
 """
 
 # Columns the model may see. Patient identifiers are deliberately absent.
@@ -146,7 +150,12 @@ def _block_labels(n: int) -> list[str]:
     return [f"A{i}" for i in range(1, n + 1)]
 
 
-def _event(c: sqlite3.Connection, accession: str, event: str, actor: str = "VoiceOps (approved)") -> None:
+def _actor(actor: str | None) -> str:
+    """Audit-trail attribution for a write: the approving human, via VoiceOps."""
+    return f"{actor} via VoiceOps" if actor else "VoiceOps (unattributed)"
+
+
+def _event(c: sqlite3.Connection, accession: str, event: str, actor: str) -> None:
     c.execute("INSERT INTO events (accession, ts, event, actor) VALUES (?, ?, ?, ?)", (accession, _now(), event, actor))
 
 
@@ -231,7 +240,7 @@ def list_instruments(status: Literal["online", "maintenance", "qc_hold", "offlin
 # ----------------------------------------------------------------- writes ---
 @mcp.tool(annotations=WRITE)
 def order_stain(accession: str, stain: str, block: str = "A1", reason: str | None = None,
-                dry_run: bool = False) -> dict[str, Any]:
+                dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Order a stain (H&E, special stain, or IHC) on a block of a specimen. Writes to the LIMS;
     held for supervisor approval."""
     _maybe_fault()
@@ -255,15 +264,16 @@ def order_stain(accession: str, stain: str, block: str = "A1", reason: str | Non
             return {"dry_run": True, "summary": f"order {canonical} on {spec['accession']} block {block}", **preview}
         cur = c.execute(
             "INSERT INTO stain_orders (accession, block, stain, status, instrument_id, ordered_at, ordered_by, reason) "
-            "VALUES (?, ?, ?, 'ordered', NULL, ?, 'VoiceOps (approved)', ?)",
-            (spec["accession"], block, canonical, _now(), reason))
-        _event(c, spec["accession"], f"stain ordered: {canonical} on {block}" + (f" ({reason})" if reason else ""))
+            "VALUES (?, ?, ?, 'ordered', NULL, ?, ?, ?)",
+            (spec["accession"], block, canonical, _now(), _actor(actor), reason))
+        _event(c, spec["accession"], f"stain ordered: {canonical} on {block}" + (f" ({reason})" if reason else ""),
+               _actor(actor))
     return {"order_id": cur.lastrowid, "accession": spec["accession"], "block": block, "stain": canonical,
             "status": "ordered"}
 
 
 @mcp.tool(annotations=WRITE)
-def flag_specimen(accession: str, reason: str, dry_run: bool = False) -> dict[str, Any]:
+def flag_specimen(accession: str, reason: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Flag a specimen for a problem (labeling discrepancy, insufficient tissue, etc.).
     Flagged specimens show on the supervisor's worklist. Held for approval."""
     _maybe_fault()
@@ -275,13 +285,13 @@ def flag_specimen(accession: str, reason: str, dry_run: bool = False) -> dict[st
             return {"dry_run": True, "summary": f"flag {spec['accession']}: {reason.strip()}", "accession": spec["accession"],
                     "reason": reason.strip(), "replaces_flag": spec["flag"]}
         c.execute("UPDATE specimens SET flag = ? WHERE accession = ?", (reason.strip(), spec["accession"]))
-        _event(c, spec["accession"], f"flagged: {reason.strip()}")
+        _event(c, spec["accession"], f"flagged: {reason.strip()}", _actor(actor))
     return {"accession": spec["accession"], "flag": reason.strip()}
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
 def set_instrument_status(instrument: str, status: Literal["online", "maintenance", "qc_hold", "offline"],
-                          note: str, dry_run: bool = False) -> dict[str, Any]:
+                          note: str, dry_run: bool = False, actor: str | None = None) -> dict[str, Any]:
     """Change an instrument's status (e.g. put it on QC hold or bring it back online).
     Affects every specimen routed to it. Held for supervisor approval."""
     _maybe_fault()
@@ -300,6 +310,8 @@ def set_instrument_status(instrument: str, status: Literal["online", "maintenanc
                     "instrument": inst["id"],
                     "from": inst["status"], "to": status, "in_progress_stains_affected": affected}
         c.execute("UPDATE instruments SET status = ?, note = ? WHERE id = ?", (status, note, inst["id"]))
+        c.execute("INSERT INTO instrument_log (instrument_id, ts, change, actor) VALUES (?, ?, ?, ?)",
+                  (inst["id"], _now(), f"{inst['status']} -> {status}: {note}", _actor(actor)))
     return {"instrument": inst["id"], "previous_status": inst["status"], "status": status, "note": note}
 
 

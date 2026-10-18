@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS actions (
     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, tool TEXT NOT NULL, args TEXT NOT NULL,
     status TEXT NOT NULL,            -- pending | approved | denied | executed | failed | expired
-    preview TEXT, created_at REAL NOT NULL, resolved_at REAL, resolved_by TEXT, result TEXT
+    preview TEXT, created_at REAL NOT NULL, resolved_at REAL, resolved_by TEXT, result TEXT,
+    requested_by TEXT, approvers TEXT
 );
 CREATE TABLE IF NOT EXISTS traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, turn_id TEXT NOT NULL,
@@ -42,10 +43,18 @@ class Action:
     status: str
     created_at: float
     preview: dict[str, Any] | None = None
+    requested_by: str | None = None
+    approvers: list[str] | None = None  # roles allowed to approve, fixed when the request is made
 
     def public(self) -> dict[str, Any]:
         return {"action_id": self.id, "tool": self.tool, "args": self.args, "status": self.status,
-                "preview": self.preview}
+                "preview": self.preview, "requested_by": self.requested_by, "approvers": self.approvers}
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "Action":
+        return cls(row["id"], row["session_id"], row["tool"], json.loads(row["args"]), row["status"],
+                   row["created_at"], json.loads(row["preview"]) if row["preview"] else None,
+                   row["requested_by"], json.loads(row["approvers"]) if row["approvers"] else None)
 
 
 class ActionError(Exception):
@@ -58,6 +67,11 @@ class Store:
         self.path = path
         with self._conn() as c:
             c.executescript(SCHEMA)
+            # Lightweight migration for databases created before these columns existed.
+            have = {r["name"] for r in c.execute("PRAGMA table_info(actions)")}
+            for col in ("requested_by", "approvers"):
+                if col not in have:
+                    c.execute(f"ALTER TABLE actions ADD COLUMN {col} TEXT")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -88,13 +102,16 @@ class Store:
 
     # ---- actions (human-in-the-loop) ---------------------------------------
     def create_action(self, session_id: str, tool: str, args: dict[str, Any],
-                      preview: dict[str, Any] | None = None) -> Action:
-        action = Action(str(uuid.uuid4()), session_id, tool, args, "pending", time.time(), preview)
+                      preview: dict[str, Any] | None = None, requested_by: str | None = None,
+                      approvers: list[str] | None = None) -> Action:
+        action = Action(str(uuid.uuid4()), session_id, tool, args, "pending", time.time(), preview,
+                        requested_by, approvers)
         with self._conn() as c:
             c.execute(
-                "INSERT INTO actions (id, session_id, tool, args, preview, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO actions (id, session_id, tool, args, preview, status, created_at, requested_by, approvers) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (action.id, session_id, tool, json.dumps(args), json.dumps(preview, default=str), "pending",
-                 action.created_at),
+                 action.created_at, requested_by, json.dumps(approvers) if approvers is not None else None),
             )
         return action
 
@@ -115,8 +132,9 @@ class Store:
             )
             if cur.rowcount != 1:
                 raise ActionError(f"action already {row['status']}")
-        return Action(row["id"], row["session_id"], row["tool"], json.loads(row["args"]), decision,
-                      row["created_at"], json.loads(row["preview"]) if row["preview"] else None)
+        action = Action.from_row(row)
+        action.status = decision
+        return action
 
     def finish_action(self, action_id: str, status: str, result: Any) -> None:
         with self._conn() as c:
@@ -127,6 +145,19 @@ class Store:
         with self._conn() as c:
             row = c.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
         return dict(row) if row else None
+
+    def load_action(self, action_id: str) -> Action | None:
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+        return Action.from_row(row) if row else None
+
+    def list_actions(self, status: str | None = "pending", limit: int = 50) -> list[Action]:
+        sql, args = "SELECT * FROM actions", []
+        if status:
+            sql += " WHERE status = ?"; args.append(status)
+        with self._conn() as c:
+            rows = c.execute(sql + " ORDER BY created_at DESC LIMIT ?", (*args, limit)).fetchall()
+        return [Action.from_row(r) for r in rows]
 
     # ---- traces -------------------------------------------------------------
     def trace(self, session_id: str, turn_id: str, kind: str, name: str | None = None,

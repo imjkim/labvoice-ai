@@ -18,10 +18,12 @@ import anyio
 
 from voiceops.agent.loop import Agent
 from voiceops.agent.store import ActionError, Store
+from voiceops.auth import DEMO_USERS
 from voiceops.config import default_servers
 from voiceops.llm import AssistantMessage, ScriptedLLM, ToolCallRequest
 from voiceops.mcp_host import HostedTool, MCPHost
 
+LEAD_TECH, SUPERVISOR, PATHOLOGIST = DEMO_USERS["rpatel"], DEMO_USERS["dreyes"], DEMO_USERS["cruiz"]
 STAR = "S26-00312"  # planted: STAT breast biopsy, HER2 stuck on IHC-01 (failed QC)
 
 
@@ -80,10 +82,10 @@ def test_write_is_held_then_executes_exactly_once():
         assert len(await orders_for(host, STAR)) == n_before, "write must NOT run before approval"
 
         action_id = res.pending_actions[0]["action_id"]
-        out = await agent.resolve_action(action_id, approve=True)
+        out = await agent.resolve_action(action_id, approve=True, by=PATHOLOGIST)
         assert out["status"] == "executed" and out["result"]["stain"] == "Ki-67"
         try:
-            await agent.resolve_action(action_id, approve=True)
+            await agent.resolve_action(action_id, approve=True, by=PATHOLOGIST)
             raise AssertionError("second approval must fail")
         except ActionError:
             pass
@@ -125,7 +127,7 @@ def test_model_never_sees_dry_run_and_cannot_set_it():
         agent = Agent(llm, host, store)
         res = await agent.run_turn("flag 312")
         assert "dry_run" not in res.pending_actions[0]["args"]
-        out = await agent.resolve_action(res.pending_actions[0]["action_id"], approve=True)
+        out = await agent.resolve_action(res.pending_actions[0]["action_id"], approve=True, by=LEAD_TECH)
         assert out["status"] == "executed" and "dry_run" not in out["result"]
         assert (await host.call("lims__get_specimen", {"accession": STAR})).data["flag"] == "label smudged"
     run(body)
@@ -137,7 +139,7 @@ def test_denied_action_never_executes():
             call("lims__flag_specimen", {"accession": "S26-00287", "reason": "cassette count mismatch"})])])
         agent = Agent(llm, host, store)
         res = await agent.run_turn("flag 287")
-        out = await agent.resolve_action(res.pending_actions[0]["action_id"], approve=False)
+        out = await agent.resolve_action(res.pending_actions[0]["action_id"], approve=False, by=LEAD_TECH)
         assert out["status"] == "denied"
         spec = (await host.call("lims__get_specimen", {"accession": "S26-00287"})).data
         assert spec["flag"] is None
@@ -161,7 +163,7 @@ def test_execution_revalidates_if_state_changed_after_approval_request():
                     c.execute("INSERT INTO qc_runs (instrument_id, run_at, result, notes, performed_by) "
                               "VALUES ('HE-01', '2999-01-01T00:00+00:00', 'fail', 'eosin too pale', 'R. Patel')")
 
-                out = await agent.resolve_action(res.pending_actions[0]["action_id"], approve=True)
+                out = await agent.resolve_action(res.pending_actions[0]["action_id"], approve=True, by=SUPERVISOR)
                 assert out["status"] == "failed" and "QC failed" in out["result"]["error"]
     anyio.run(main)
 
