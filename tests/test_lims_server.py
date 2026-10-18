@@ -125,3 +125,31 @@ def test_accession_parameter_is_described_in_the_schema():
                 props = host.tools["lims__get_specimen"].openai_schema()["function"]["parameters"]["properties"]
                 assert "Never add or guess a year prefix" in props["accession"]["description"]
     anyio.run(main)
+
+
+def test_no_real_lab_entities_in_model_visible_text():
+    """Examples in prompts and tool schemas must not be real specimens or instruments: the model
+    reuses examples as arguments (observed: an unprompted lookup of the example 'IHC stainer one')."""
+    import re
+
+    from voiceops.agent.loop import SYSTEM_PROMPT
+
+    schema_words = {"object", "string", "boolean", "integer", "null", "array", "type", "properties",
+                    "description", "default", "title", "anyOf", "enum", "required", "function", "parameters"}
+
+    async def main():
+        with tempfile.TemporaryDirectory() as d:
+            async with MCPHost(default_servers(str(Path(d) / "lims.db"))) as host:
+                texts = {"system prompt": SYSTEM_PROMPT}
+                for name, tool in host.tools.items():
+                    texts[name] = tool.description + " " + json.dumps(tool.model_schema())
+                leaks = []
+                for source, text in texts.items():
+                    quoted = {a or b for a, b in re.findall(r"'([^']{2,40})'|\"([^\"]{2,40})\"", text)}
+                    ids = set(re.findall(r"\bS\d{2}-\d{5}\b|\b[A-Z]{2,3}-\d{2}\b", text))
+                    for candidate in sorted((quoted | ids) - schema_words):
+                        for tool, arg in (("lims__get_specimen", "accession"), ("lims__get_instrument", "instrument")):
+                            if (await host.call(tool, {arg: candidate})).ok:
+                                leaks.append(f"{source}: {candidate!r} is a real entity")
+                assert not leaks, leaks
+    anyio.run(main)
