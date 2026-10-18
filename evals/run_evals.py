@@ -134,7 +134,10 @@ def main() -> None:
     ap.add_argument("--tag", default=None, help="only cases with this tag")
     a = ap.parse_args()
 
-    cases = [json.loads(l) for l in (HERE / "cases.jsonl").read_text().splitlines() if l.strip()]
+    # Cases write accessions as {YY}-00312 so they don't break when the year (and the S<yy> prefix) changes.
+    yy = f"S{time.localtime().tm_year % 100:02d}"
+    text = (HERE / "cases.jsonl").read_text(encoding="utf-8").replace("{YY}", yy)
+    cases = [json.loads(l) for l in text.splitlines() if l.strip()]
     if a.only:
         cases = [c for c in cases if c["id"] in a.only.split(",")]
     if a.tag:
