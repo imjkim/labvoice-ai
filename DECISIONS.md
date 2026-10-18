@@ -107,12 +107,25 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Context:** Two failures came from instructions read too literally: "always say the full accession" made the model ask for the full number instead of acting, and despite "pass it as-is" it rewrote "287" as `S28-0287`.
 - **Decision:** Separate *what to pass* from *what to say* in the prompt, and put input guidance in the tool schema's parameter descriptions, where the model writes the argument. The server also rejects future-year prefixes with a "did you mean" that names the right call.
 
+### D20. A no-build web client served by the API
+- **Context:** The bench client needs a microphone button, spoken answers, the agent's steps and an approval queue. It will run on a lab workstation, possibly offline.
+- **Decision:** Plain ES modules and CSS in `web/`, served by FastAPI at `/`. No framework, bundler or `npm install`. Pure logic (timeline, latency breakdown) lives in its own module with Node built-in tests.
+- **Rejected:** React + Vite. Better for a large UI, but it adds a toolchain and a build step to a one-screen client, and a second process to the demo.
+- **Consequences:** One command runs everything. Model output reaches the page only through `textContent`. FastAPI's static serving relies on Python's `mimetypes`, which on Windows can map `.js` to `text/plain` (browsers then refuse to run the modules), so the types are pinned explicitly.
+
+### D21. Voice I/O: hold-to-talk, browser speech, interruptible
+- **Decision:** Hold-to-talk (button or space bar) rather than always-listening voice activity detection; Whisper on the server with a lab-vocabulary prompt; spoken answers through the browser's built-in voices. Pressing talk while the assistant speaks stops it (barge-in); pressing while it's still thinking abandons that answer.
+- **Why:** Hold-to-talk makes "when is it listening?" unambiguous in a shared lab and keeps bench chatter out of the transcript. Browser speech is free and starts quickly; a local neural voice can replace it behind the same interface.
+- **Consequences:** An abandoned turn still finishes on the server and stays in that session's history, though the client stops showing it. Writes are unaffected, since they only ever become pending approvals. Cancelling server-side work is an open item.
+
 ---
 
 ## Open questions
 - Redacting PHI from STT transcripts before traces are written.
 - Structured transient-error signaling from MCP servers instead of a regex.
 - Voice framework (Pipecat / LiveKit Agents) vs hand-rolled streaming + barge-in. Decide with latency numbers, not taste.
+- Cancel the server-side turn when the user interrupts (D21).
+- Streaming answers (speak the first sentence while the rest is generated).
 
 ---
 
