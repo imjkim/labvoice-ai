@@ -95,7 +95,7 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 
 ### D17. Don't tune against the test you report
 - **Context:** Fixing what the eval set exposes and then re-running the same cases inflates the score.
-- **Decision:** Fixes target *classes* of failure, not individual cases. New cases were written alongside the fixes (multi-hop, spoken numbers, scope, ETA). Cases use `{YY}` instead of a hard-coded year prefix so they keep working next year. For the fine-tune, training data and the reported eval set will be strictly separate.
+- **Decision:** Fixes target *classes* of failure, not individual cases. New cases were written alongside the fixes (multi-hop, spoken numbers, scope, ETA). Cases use `{YY}` instead of a hard-coded year prefix so they keep working next year. For the fine-tune, training data and the reported eval set will be strictly separate. Scorer fixes are allowed only for measurement errors (a correct answer marked wrong), and are disclosed in the commit and the results history: e.g. `instrument-qc` was failing "did not pass QC" because the check required the word "fail".
 
 ### D18. A grounding guard, in code
 - **Context:** In the second eval run the model answered "Why isn't 312 ready yet?" **without calling any tool**: "S26-00312 is overdue and blocked by a labeling discrepancy." Fluent, specific, false. The invented details echoed words the system prompt had emphasized (OVERDUE, BLOCKED, FLAGGED).
