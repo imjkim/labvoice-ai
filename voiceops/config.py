@@ -37,7 +37,7 @@ class Settings:
     # Any OpenAI-compatible chat-completions endpoint. Defaults to local Ollama.
     llm_base_url: str = _env("LLM_BASE_URL", "http://127.0.0.1:11434/v1")
     llm_api_key: str = _env("LLM_API_KEY", "ollama")
-    llm_model: str = _env("LLM_MODEL", "qwen3:4b")
+    llm_model: str = _env("LLM_MODEL", "qwen3:4b-instruct")  # non-thinking; see DECISIONS D15
     llm_temperature: float = float(_env("LLM_TEMPERATURE", "0"))
 
     max_agent_steps: int = int(_env("MAX_AGENT_STEPS", "6"))
