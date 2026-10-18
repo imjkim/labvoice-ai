@@ -40,8 +40,22 @@ class OpenAICompatLLM:
         from openai import AsyncOpenAI  # lazy: tests don't need the SDK
 
         self.model = model or settings.llm_model
-        self._client = AsyncOpenAI(base_url=base_url or settings.llm_base_url,
-                                   api_key=api_key or settings.llm_api_key)
+        self.base_url = base_url or settings.llm_base_url
+        self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key or settings.llm_api_key)
+
+    async def check(self) -> None:
+        """Fail fast with an actionable message if the endpoint or model isn't available."""
+        try:
+            models = await self._client.with_options(timeout=5, max_retries=0).models.list()
+        except Exception as exc:
+            hint = " Is Ollama installed and running?" if "11434" in self.base_url else ""
+            raise RuntimeError(f"Can't reach the LLM endpoint at {self.base_url} ({type(exc).__name__}).{hint}") from exc
+        available = {m.id for m in models.data}
+        if self.model not in available:
+            msg = f"Model '{self.model}' isn't available at {self.base_url}."
+            if "11434" in self.base_url:  # Ollama lists exactly what's pulled, so this is definitive
+                raise RuntimeError(f"{msg} Run: ollama pull {self.model}")
+            print(f"warning: {msg} Continuing; some providers don't list every model.")
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> AssistantMessage:
         resp = await self._client.chat.completions.create(

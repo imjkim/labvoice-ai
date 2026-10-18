@@ -106,6 +106,7 @@ async def run(cases: list[dict[str, Any]], model: str | None, runs: int, fault_r
     from voiceops.llm import OpenAICompatLLM
 
     llm = OpenAICompatLLM(model=model)
+    await llm.check()  # don't produce a page of fake failures when the model is unreachable
     rows: list[dict[str, Any]] = []
     for r in range(runs):
         for case in cases:
@@ -136,7 +137,10 @@ def main() -> None:
         cases = [c for c in cases if c["id"] in a.only.split(",")]
     if a.tag:
         cases = [c for c in cases if a.tag in c.get("tags", [])]
-    report = anyio.run(run, cases, a.model, a.runs, a.fault_rate)
+    try:
+        report = anyio.run(run, cases, a.model, a.runs, a.fault_rate)
+    except RuntimeError as exc:
+        raise SystemExit(f"error: {exc}") from None
 
     out = HERE / "results" / f"{report['model'].replace(':', '_').replace('/', '_')}-{int(time.time())}.json"
     out.parent.mkdir(exist_ok=True)
