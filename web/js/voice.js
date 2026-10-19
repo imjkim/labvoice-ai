@@ -1,64 +1,6 @@
-// Microphone capture (hold-to-talk) and speech output, with no dependencies.
-// Speech output uses the browser's built-in voices: free, offline-capable on most systems,
+// Speech output, with no dependencies. (Microphone capture lives in listener.js.)
+// It uses the browser's built-in voices: free, offline-capable on most systems,
 // and good enough to judge the interaction. A local neural TTS can replace it later.
-
-const MIME_CANDIDATES = [
-  ["audio/webm;codecs=opus", "webm"],
-  ["audio/ogg;codecs=opus", "ogg"],
-  ["audio/mp4", "mp4"], // Safari
-];
-
-export class Recorder {
-  constructor() {
-    this.stream = null;
-    this.recorder = null;
-    this.chunks = [];
-    this.startedAt = 0;
-    const found = MIME_CANDIDATES.find(([m]) => globalThis.MediaRecorder?.isTypeSupported?.(m));
-    [this.mimeType, this.extension] = found || ["", "webm"];
-  }
-
-  get supported() {
-    return Boolean(navigator.mediaDevices?.getUserMedia && globalThis.MediaRecorder);
-  }
-
-  /** Ask for the microphone once and keep the stream, so later presses start instantly. */
-  async open() {
-    if (this.stream) return;
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-    });
-  }
-
-  async start() {
-    await this.open();
-    this.chunks = [];
-    this.recorder = new MediaRecorder(this.stream, this.mimeType ? { mimeType: this.mimeType } : undefined);
-    this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
-    this.recorder.start();
-    this.startedAt = performance.now();
-  }
-
-  /** Stops recording. Resolves to { blob, filename, durationMs }. */
-  stop() {
-    return new Promise((resolve) => {
-      if (!this.recorder || this.recorder.state === "inactive") {
-        resolve({ blob: null, filename: "", durationMs: 0 });
-        return;
-      }
-      const durationMs = performance.now() - this.startedAt;
-      this.recorder.onstop = () => {
-        const blob = new Blob(this.chunks, { type: this.mimeType || "audio/webm" });
-        resolve({ blob, filename: `speech.${this.extension}`, durationMs });
-      };
-      this.recorder.stop();
-    });
-  }
-
-  get recording() {
-    return this.recorder?.state === "recording";
-  }
-}
 
 export class Speaker {
   constructor() {

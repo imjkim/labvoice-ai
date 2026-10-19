@@ -77,8 +77,8 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Consequences:** Not authentication. A real deployment takes identity from the lab's SSO (OIDC/SAML) and roles from its directory; the policy and enforcement points stay the same.
 
 ### D14. The approver is written into the system of record
-- **Context:** A LIMS audit trail that says "VoiceOps did it" is useless to a lab director or an inspector.
-- **Decision:** Write tools take an `actor` parameter that only the host sets (hidden from the model's schema and stripped from model arguments, like `dry_run`). On execution the host passes the approving human, and the LIMS records "Dr. Carmen Ruiz (pathologist) via VoiceOps" on the event, the stain order, and the instrument log.
+- **Context:** A LIMS audit trail that says "the assistant did it" is useless to a lab director or an inspector.
+- **Decision:** Write tools take an `actor` parameter that only the host sets (hidden from the model's schema and stripped from model arguments, like `dry_run`). On execution the host passes the approving human, and the LIMS records "Dr. Carmen Ruiz (pathologist) via LabVoice" on the event, the stain order, and the instrument log.
 - **Consequences:** The model can't forge attribution (tested).
 
 ### D15. A non-thinking model for the voice path
@@ -118,6 +118,13 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Why:** Hold-to-talk makes "when is it listening?" unambiguous in a shared lab and keeps bench chatter out of the transcript. Browser speech is free and starts quickly; a local neural voice can replace it behind the same interface.
 - **Consequences:** An abandoned turn still finishes on the server and stays in that session's history, though the client stops showing it. Writes are unaffected, since they only ever become pending approvals. Cancelling server-side work is an open item.
 
+### D22. Hands-free listening (supersedes the hold-to-talk part of D21)
+- **Context:** Holding a button defeats the point at a bench where both hands are busy.
+- **Decision:** One click turns the microphone on (browsers require a click before audio capture, and it makes "the mic is live" an explicit choice in a shared room); after that, an energy-based voice activity detector finds each question. It compares every 20 ms frame against an adaptive noise floor (falls fast, rises slowly), needs 160 ms of sustained speech to start (ignores clicks and dropped racks), ends after 750 ms of silence, keeps 300 ms of pre-roll so the first word isn't clipped, and caps a question at 15 s. Audio is captured with an AudioWorklet and sent as 16 kHz WAV.
+- **Echo:** With an always-open mic, the assistant would hear its own voice. Listening pauses while it speaks; Esc or a click stops it mid-answer. Browser echo cancellation doesn't reliably cover speech-synthesis output, so voice barge-in waits for a better signal (planned: a raised-hand gesture or a stop word).
+- **Phantom transcripts:** Always-on listening sends coughs and clatter to Whisper, which tends to "hear" stock phrases ("Thank you.") or echo its vocabulary prompt. The server drops segments Whisper scores as non-speech, whole-transcript phantom phrases, and prompt echoes; an empty transcript quietly returns to listening.
+- **Rejected:** A neural VAD (e.g. Silero) in the browser. More accurate in noise, but it needs a model runtime and download, and the energy detector is small, offline and unit-tested with synthetic audio. Revisit if false triggers in a real lab are a problem.
+
 ---
 
 ## Open questions
@@ -125,6 +132,7 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - Structured transient-error signaling from MCP servers instead of a regex.
 - Voice framework (Pipecat / LiveKit Agents) vs hand-rolled streaming + barge-in. Decide with latency numbers, not taste.
 - Cancel the server-side turn when the user interrupts (D21).
+- Voice barge-in during speech: a raised-hand gesture or a stop word (D22).
 - Streaming answers (speak the first sentence while the rest is generated).
 
 ---

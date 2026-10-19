@@ -48,7 +48,7 @@ async def _warm_up(llm: OpenAICompatLLM) -> None:
         log.warning("Model warm-up skipped: %s", exc)
 
 
-app = FastAPI(title="VoiceOps", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="LabVoice AI", version="0.4.0", lifespan=lifespan)
 api = APIRouter(prefix="/api")
 
 
@@ -91,6 +91,16 @@ def users() -> list[dict]:
 def policy() -> dict:
     """Who may approve which write tool (shown in the client next to each request)."""
     return {"default": sorted(DEFAULT_APPROVERS), "tools": {t: sorted(r) for t, r in APPROVAL_POLICY.items()}}
+
+
+@api.get("/overview")
+async def overview() -> dict:
+    from voiceops.overview import lab_overview
+
+    try:
+        return await lab_overview(_agent().host)
+    except RuntimeError as exc:
+        raise HTTPException(503, f"LIMS unavailable: {exc}") from exc
 
 
 @api.get("/me")

@@ -187,8 +187,8 @@ def _block_labels(n: int) -> list[str]:
 
 
 def _actor(actor: str | None) -> str:
-    """Audit-trail attribution for a write: the approving human, via VoiceOps."""
-    return f"{actor} via VoiceOps" if actor else "VoiceOps (unattributed)"
+    """Audit-trail attribution for a write: the approving human, via LabVoice."""
+    return f"{actor} via LabVoice" if actor else "LabVoice (unattributed)"
 
 
 def _event(c: sqlite3.Connection, accession: str, event: str, actor: str) -> None:
