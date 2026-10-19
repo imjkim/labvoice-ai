@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceOps bench</title>
+  <meta name="description" content="Hands-free assistant for histology lab benches.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body data-phase="idle">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">VoiceOps</span>
+      <span class="brand-place">Histology bench</span>
+    </div>
+    <label class="who">
+      <span>You are</span>
+      <select id="user-select" aria-describedby="who-help"></select>
+    </label>
+    <p id="who-help" class="sr-only">Switch people to try approvals: a tech asks, a supervisor or pathologist approves.</p>
+  </header>
+
+  <main class="layout">
+    <section class="talk" aria-label="Conversation">
+      <div class="convo-scroll">
+        <div id="empty" class="empty">
+          <p class="empty-lead">Ask about any specimen, stain or instrument. Hold the slide below and speak, or try one of these:</p>
+          <ul class="suggestions">
+            <li><button type="button" class="chip" data-ask="Why isn't 312 ready yet?">Why isn't 312 ready yet?</button></li>
+            <li><button type="button" class="chip" data-ask="Which instruments are down?">Which instruments are down?</button></li>
+            <li><button type="button" class="chip" data-ask="Order a Ki-67 on block A2 for 312.">Order a Ki-67 on block A2 for 312.</button></li>
+          </ul>
+        </div>
+        <ol id="convo" class="convo" aria-live="polite"></ol>
+      </div>
+
+      <div class="controls">
+        <button id="talk" class="slide" type="button" aria-pressed="false" aria-describedby="talk-hint">
+          <span class="slide-label">
+            <span id="talk-state" class="slide-state">Hold to talk</span>
+            <span id="talk-hint" class="slide-hint">or hold the space bar</span>
+          </span>
+          <span class="slide-tissue" aria-hidden="true"></span>
+        </button>
+        <form id="type-form" class="type">
+          <label for="type-input" class="sr-only">Type a question</label>
+          <input id="type-input" type="text" placeholder="Or type a question" autocomplete="off">
+          <button type="submit" class="btn">Ask</button>
+        </form>
+        <div class="controls-row">
+          <p id="status" class="status" role="status" aria-live="polite"></p>
+          <button id="new-convo" type="button" class="btn-link">New conversation</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel" aria-labelledby="queue-heading">
+        <h2 id="queue-heading">Waiting for approval <span id="queue-count" class="count"></span></h2>
+        <ul id="queue" class="queue"></ul>
+        <p id="queue-empty" class="panel-empty">Nothing is waiting. Changes to the LIMS (stain orders, flags, instrument status) appear here until the right person approves them.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="trace-heading">
+        <h2 id="trace-heading">What happened</h2>
+        <div id="latency" class="latency"></div>
+        <ol id="trace" class="trace"></ol>
+        <p id="trace-empty" class="panel-empty">Each answer shows its steps here: what was heard, which LIMS tools ran, any safety checks, and how long each took.</p>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <p id="system">Connecting</p>
+    <p>All lab data is synthetic.</p>
+  </footer>
+</body>
+</html>

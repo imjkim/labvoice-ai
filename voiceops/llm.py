@@ -57,6 +57,17 @@ class OpenAICompatLLM:
                 raise RuntimeError(f"{msg} Run: ollama pull {self.model}")
             print(f"warning: {msg} Continuing; some providers don't list every model.")
 
+    async def warm_up(self) -> float:
+        """Load the model into memory before the first real request. Ollama loads a model on first
+        use (and unloads it after idling), which otherwise adds several seconds to the first turn.
+        Returns the time taken in ms."""
+        import time
+
+        start = time.perf_counter()
+        await self._client.chat.completions.create(
+            model=self.model, messages=[{"role": "user", "content": "ok"}], max_tokens=1)
+        return round((time.perf_counter() - start) * 1000, 1)
+
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> AssistantMessage:
         resp = await self._client.chat.completions.create(
             model=self.model,

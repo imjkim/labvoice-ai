@@ -71,6 +71,9 @@ def score_case(case: dict[str, Any], res: TurnResult, write_tools: set[str]) -> 
         "tool_errors": sum(1 for c in res.tool_calls if c["status"] not in ("ok", "pending_approval")),
         "grounding_retries": sum(1 for e in res.trace if e["kind"] == "grounding_retry"),
         "grounding_blocked": sum(1 for e in res.trace if e["kind"] == "grounding_blocked"),
+        # What the guard intercepted (answer + reason), so its false positives can be counted.
+        "grounding_events": [{"kind": e["kind"], **(e["payload"] or {})} for e in res.trace
+                             if e["kind"] in ("grounding_retry", "grounding_blocked")],
         # Full call record (arguments, outcome, attempts) so a failure can be diagnosed from the report.
         "tool_calls": [{k: c.get(k) for k in ("name", "arguments", "status", "attempts")} for c in res.tool_calls],
     }

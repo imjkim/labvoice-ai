@@ -9,5 +9,6 @@ python-dotenv>=1.0
 anyio>=4.4
 # voice
 faster-whisper>=1.1
+av>=11,<19            # PyAV 19 removed av.open(metadata_errors=...), which faster-whisper 1.2.x still passes
 # dev
 pytest>=8.0
