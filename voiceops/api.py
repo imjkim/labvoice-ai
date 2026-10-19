@@ -93,6 +93,16 @@ def policy() -> dict:
     return {"default": sorted(DEFAULT_APPROVERS), "tools": {t: sorted(r) for t, r in APPROVAL_POLICY.items()}}
 
 
+@api.get("/overview")
+async def overview() -> dict:
+    from voiceops.overview import lab_overview
+
+    try:
+        return await lab_overview(_agent().host)
+    except RuntimeError as exc:
+        raise HTTPException(503, f"LIMS unavailable: {exc}") from exc
+
+
 @api.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
     return user.public()

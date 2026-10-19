@@ -44,6 +44,7 @@ export function createApi(getUserId) {
       return request("/voice", { method: "POST", form, signal });
     },
     actions: () => request("/actions"),
+    overview: () => request("/overview"),
     decide: (actionId, decision) => request(`/actions/${actionId}`, { method: "POST", json: { decision } }),
   };
 }

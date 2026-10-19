@@ -55,11 +55,37 @@ def device() -> str | None:
     return _state["device"]
 
 
+# Whisper's best-known failure on non-speech: it "hears" stock phrases from its training data.
+PHANTOM_PHRASES = {"you", "thank you", "thanks", "thank you for watching", "thanks for watching",
+                   "bye", "okay", "so", "um", "uh", "hmm"}
+
+
+def _norm(text: str) -> str:
+    return " ".join("".join(c.lower() if c.isalnum() else " " for c in text).split())
+
+
+def clean_transcript(segments: Any) -> str:
+    """Keep what was actually said. With hands-free listening, coughs and clatter reach Whisper,
+    which then tends to invent text. Drop:
+    - segments Whisper itself scores as probably-not-speech and low-confidence;
+    - a whole transcript that is a stock phantom phrase ("Thank you.");
+    - a transcript that just echoes the vocabulary prompt back (prompting makes this possible)."""
+    kept = [s.text.strip() for s in segments
+            if not (getattr(s, "no_speech_prob", 0.0) > 0.6 and getattr(s, "avg_logprob", 0.0) < -1.0)]
+    text = " ".join(t for t in kept if t).strip()
+    normalized = _norm(text)
+    if not normalized or normalized in PHANTOM_PHRASES:
+        return ""
+    if len(normalized) >= 12 and normalized in _norm(DOMAIN_PROMPT):
+        return ""
+    return text
+
+
 def _run(path: str) -> tuple[str, str]:
     segments, info = _state["model"].transcribe(path, beam_size=1, vad_filter=True, language="en",
                                                 initial_prompt=DOMAIN_PROMPT)
     # `segments` is a generator: iterating it is what actually runs decoding.
-    return " ".join(s.text.strip() for s in segments).strip(), info.language
+    return clean_transcript(segments), info.language
 
 
 def transcribe_file(path: str) -> dict[str, Any]:

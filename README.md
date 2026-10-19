@@ -66,9 +66,10 @@ uvicorn voiceops.api:app
 The model is loaded at startup so the first question isn't slow. Ollama unloads idle models after
 5 minutes; for demos, set `OLLAMA_KEEP_ALIVE=30m` in Ollama's environment to keep it loaded.
 
-Open http://localhost:8000 and allow the microphone. Hold the slide (or the space bar), ask
-"Why isn't 312 ready yet?", and release. Ask it to order a stain, then switch **You are** to
-D. Reyes (supervisor) to approve it. Talking while it answers interrupts it.
+Open http://localhost:8000, click the slide once to turn the microphone on, and allow it. From then on
+it's hands-free: ask "Why isn't 312 ready yet?" and pause; it detects when you start and stop talking.
+Ask it to order a stain, then switch **You are** to D. Reyes (supervisor) to approve it. Press Esc or
+click the slide to stop it mid-answer.
 
 ```bash
 python -m pytest -q                # agent, LIMS server, roles, grounding (Python)

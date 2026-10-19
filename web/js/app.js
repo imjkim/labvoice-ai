@@ -1,10 +1,11 @@
-// LabVoice AI bench client: hold-to-talk, spoken answers with barge-in, the agent's steps,
-// and the approval queue. Model output is untrusted, so it only ever reaches the page via
+// LabVoice AI bench client: hands-free listening, spoken answers, the agent's steps, and the
+// approval queue. Model output is untrusted, so it only ever reaches the page via
 // textContent, never innerHTML.
 
 import { ApiError, createApi } from "./api.js";
 import { describeEvent, formatArgs, formatMs, latencySegments, toolLabel, totalMs } from "./timeline.js";
-import { Recorder, Speaker } from "./voice.js";
+import { HandsFreeListener } from "./listener.js";
+import { Speaker } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -13,24 +14,39 @@ const store = {
 };
 
 const PHASES = {
-  idle: ["Hold to talk", "or hold the space bar"],
-  listening: ["Listening", "release to send"],
-  thinking: ["Checking the LIMS", "press to interrupt"],
-  speaking: ["Speaking", "press to interrupt"],
+  off: ["Microphone off", "click to start listening"],
+  ready: ["Listening", "just ask your question"],
+  hearing: ["Hearing you", "pause when you're done"],
+  thinking: ["Checking the LIMS", "speak again to start over"],
+  speaking: ["Speaking", "press Esc or click to stop"],
 };
-const MIN_RECORDING_MS = 350;
 const QUEUE_POLL_MS = 4000;
+const RESUME_AFTER_SPEECH_MS = 300; // let the room settle before listening again
 
 const state = {
-  phase: "idle",
+  phase: "off",
   userId: store.get("labvoice.user") || "mchen",
   sessionId: null,
   abort: null,
   users: [],
 };
 const api = createApi(() => state.userId);
-const recorder = new Recorder();
 const speaker = new Speaker();
+const listener = new HandsFreeListener({
+  onSpeechStart: () => {
+    // A new question cancels one still being answered.
+    if (state.phase === "thinking") state.abort?.abort();
+    setPhase("hearing");
+  },
+  onSpeech: ({ blob, filename }) =>
+    runTurn((signal) => api.voice(blob, filename, state.sessionId, signal), { spokenInput: true }),
+  onLevel: (level) => document.body.style.setProperty("--level", level.toFixed(2)),
+});
+
+/** The phase to return to when nothing is happening. */
+function restPhase() {
+  return listener.active ? "ready" : "off";
+}
 
 // ---------------------------------------------------------------- helpers ---
 function el(tag, { className, text, attrs } = {}, children = []) {
@@ -48,7 +64,7 @@ function setPhase(phase) {
   const [label, hint] = PHASES[phase];
   $("talk-state").textContent = label;
   $("talk-hint").textContent = hint;
-  $("talk").setAttribute("aria-pressed", String(phase === "listening"));
+  $("talk").setAttribute("aria-pressed", String(listener.active));
 }
 
 let statusTimer = null;
@@ -99,7 +115,7 @@ function resetConversation() {
   $("latency").replaceChildren();
   $("trace-empty").hidden = false;
   $("empty").hidden = false;
-  setPhase("idle");
+  setPhase(restPhase());
 }
 
 // ------------------------------------------------------------------ turns ---
@@ -117,9 +133,10 @@ async function runTurn(call, { spokenInput, typedText }) {
     if (spokenInput) {
       sttMs = res.timings?.stt_ms ?? null;
       if (!res.transcript?.text) {
+        // Hands-free mode hears coughs and clatter; an empty transcript just means "not a question".
         yours.remove();
-        setPhase("idle");
-        setStatus("Didn't catch that. Try again a little closer to the microphone.");
+        if (!$("convo").children.length) $("empty").hidden = false;
+        setPhase(restPhase());
         return;
       }
       yours.classList.remove("is-pending");
@@ -138,13 +155,20 @@ async function runTurn(call, { spokenInput, typedText }) {
 
     const respondedAt = performance.now();
     setPhase("speaking");
+    listener.pause(); // don't let the microphone hear the assistant's own voice
     speaker.speak(turn.answer, {
       onstart: () => renderTrace(turn.trace, sttMs, performance.now() - respondedAt),
-      onend: () => { if (state.phase === "speaking") setPhase("idle"); },
+      onend: () => {
+        setTimeout(() => {
+          listener.resume();
+          if (state.phase === "speaking") setPhase(restPhase());
+        }, RESUME_AFTER_SPEECH_MS);
+      },
     });
+    refreshOverview();
   } catch (err) {
     if (err.name === "AbortError") {
-      // The user pressed talk again while we were waiting: they've moved on.
+      // The user asked something new while we were waiting: they've moved on.
       updateMessage(yours, { meta: "interrupted" });
       yours.classList.add("is-interrupted");
       return;
@@ -152,45 +176,47 @@ async function runTurn(call, { spokenInput, typedText }) {
     yours.classList.remove("is-pending");
     updateMessage(yours, { meta: "not sent" });
     setStatus(err instanceof ApiError ? err.message : `Something went wrong: ${err.message}`, { error: true });
-    setPhase("idle");
+    setPhase(restPhase());
   } finally {
     if (state.abort === controller) state.abort = null;
   }
 }
 
-async function press() {
-  if (state.phase === "listening") return;
-  if (!recorder.supported) {
-    setStatus("This browser can't record audio. Type your question instead.", { error: true });
+async function startListening() {
+  if (!listener.supported) {
+    setStatus("This browser can't use the microphone. Type your question instead.", { error: true });
     return;
   }
-  // Barge-in: talking over the assistant stops it, and a new question cancels a pending one.
-  if (state.phase === "speaking") speaker.cancel();
-  if (state.phase === "thinking") state.abort?.abort();
   try {
-    await recorder.start();
-    setPhase("listening");
+    await listener.start();
+    setPhase("ready");
   } catch (err) {
+    await listener.stop();
     setStatus(micErrorMessage(err), { error: true });
-    setPhase("idle");
+    setPhase("off");
   }
 }
 
-async function release() {
-  if (state.phase !== "listening") return;
-  const { blob, filename, durationMs } = await recorder.stop();
-  if (!blob || durationMs < MIN_RECORDING_MS) {
-    setPhase("idle");
-    setStatus("Hold the button for as long as you're speaking.");
-    return;
-  }
-  await runTurn((signal) => api.voice(blob, filename, state.sessionId, signal), { spokenInput: true });
+async function stopListening() {
+  await listener.stop();
+  if (state.phase === "ready" || state.phase === "hearing") setPhase("off");
+}
+
+/** Stop the assistant mid-answer. A gesture or a stop word can call this later. */
+function stopSpeaking() {
+  if (state.phase === "speaking") speaker.cancel(); // onend resumes listening
+}
+
+function onSlideClick() {
+  if (state.phase === "off") startListening();
+  else if (state.phase === "speaking") stopSpeaking();
+  else if (state.phase === "ready" || state.phase === "hearing") stopListening();
 }
 
 async function ask(text) {
   const question = text.trim();
   if (!question) return;
-  if (state.phase === "speaking") speaker.cancel();
+  stopSpeaking();
   if (state.phase === "thinking") state.abort?.abort();
   await runTurn((signal) => api.ask(question, state.sessionId, signal), { typedText: question });
 }
@@ -263,6 +289,7 @@ function renderAction(a) {
       const out = await api.decide(a.action_id, decision);
       showDecision(a, summary, decision, out);
       refreshQueue();
+      refreshOverview();
     } catch (err) {
       error.textContent = err.message;
       button.disabled = false;
@@ -321,6 +348,26 @@ function showDecision(action, summary, decision, out) {
   }
 }
 
+// --------------------------------------------------------------- overview ---
+async function refreshOverview() {
+  let o;
+  try {
+    o = await api.overview();
+  } catch {
+    return;
+  }
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const items = [
+    plural(o.overdue, "case overdue", "cases overdue"),
+    plural(o.flagged, "specimen flagged", "specimens flagged"),
+    o.down.length
+      ? `${plural(o.down.length, "instrument", "instruments")} down: ${o.down.map((d) => d.name).join(", ")}`
+      : "all instruments online",
+  ];
+  $("overview").replaceChildren(...items.map((text) => el("li", { text })));
+  $("overview-wrap").hidden = false;
+}
+
 // ------------------------------------------------------------------ setup ---
 async function loadUsers() {
   try {
@@ -346,31 +393,12 @@ async function loadHealth() {
   }
 }
 
-function isTyping(target) {
-  return target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
-}
-
 function wire() {
-  const talk = $("talk");
-  talk.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    talk.setPointerCapture(e.pointerId);
-    press();
-  });
-  talk.addEventListener("pointerup", release);
-  talk.addEventListener("pointercancel", release);
-  talk.addEventListener("contextmenu", (e) => e.preventDefault()); // long-press on touch screens
-
-  // Hold the space bar anywhere except while typing.
+  $("talk").addEventListener("click", onSlideClick);
   document.addEventListener("keydown", (e) => {
-    if (e.code !== "Space" || isTyping(e.target)) return;
-    e.preventDefault();
-    if (!e.repeat) press();
-  });
-  document.addEventListener("keyup", (e) => {
-    if (e.code !== "Space" || isTyping(e.target)) return;
-    e.preventDefault();
-    release();
+    if (e.key !== "Escape") return;
+    if (state.phase === "speaking") stopSpeaking();
+    else if (state.phase === "thinking") state.abort?.abort();
   });
 
   $("type-form").addEventListener("submit", (e) => {
@@ -380,9 +408,6 @@ function wire() {
     input.value = "";
     ask(text);
   });
-  for (const button of document.querySelectorAll("[data-ask]")) {
-    button.addEventListener("click", () => ask(button.dataset.ask));
-  }
   $("new-convo").addEventListener("click", resetConversation);
   $("user-select").addEventListener("change", (e) => {
     state.userId = e.target.value;
@@ -395,8 +420,9 @@ function wire() {
   setInterval(() => document.visibilityState === "visible" && refreshQueue(), QUEUE_POLL_MS);
 }
 
-setPhase("idle");
+setPhase("off");
 wire();
 await loadUsers();
 loadHealth();
 refreshQueue();
+refreshOverview();

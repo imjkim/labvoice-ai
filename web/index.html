@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="js/app.js"></script>
 </head>
-<body data-phase="idle">
+<body data-phase="off">
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">LabVoice AI</span>
@@ -28,12 +28,11 @@
     <section class="talk" aria-label="Conversation">
       <div class="convo-scroll">
         <div id="empty" class="empty">
-          <p class="empty-lead">Ask about any specimen, stain or instrument. Hold the slide below and speak, or try one of these:</p>
-          <ul class="suggestions">
-            <li><button type="button" class="chip" data-ask="Why isn't 312 ready yet?">Why isn't 312 ready yet?</button></li>
-            <li><button type="button" class="chip" data-ask="Which instruments are down?">Which instruments are down?</button></li>
-            <li><button type="button" class="chip" data-ask="Order a Ki-67 on block A2 for 312.">Order a Ki-67 on block A2 for 312.</button></li>
-          </ul>
+          <p class="empty-lead">Turn on the microphone, then ask about any specimen, stain, instrument or QC run. You can also type.</p>
+          <div id="overview-wrap" class="overview" hidden>
+            <p class="overview-title">In the lab right now</p>
+            <ul id="overview"></ul>
+          </div>
         </div>
         <ol id="convo" class="convo" aria-live="polite"></ol>
       </div>
@@ -41,8 +40,8 @@
       <div class="controls">
         <button id="talk" class="slide" type="button" aria-pressed="false" aria-describedby="talk-hint">
           <span class="slide-label">
-            <span id="talk-state" class="slide-state">Hold to talk</span>
-            <span id="talk-hint" class="slide-hint">or hold the space bar</span>
+            <span id="talk-state" class="slide-state">Microphone off</span>
+            <span id="talk-hint" class="slide-hint">click to start listening</span>
           </span>
           <span class="slide-tissue" aria-hidden="true"></span>
         </button>

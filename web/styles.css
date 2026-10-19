@@ -84,12 +84,9 @@ p { margin: 0; }
 /* ---------------------------------------------------------- conversation */
 .empty { max-width: 34rem; padding-top: 1rem; }
 .empty-lead { color: var(--ink-2); margin-bottom: 1rem; }
-.suggestions { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.chip {
-  padding: 0.45rem 0.85rem; border: 1px solid var(--line); border-radius: 999px;
-  background: var(--surface); cursor: pointer;
-}
-.chip:hover { border-color: var(--hema-light); }
+.overview { padding: 0.8rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.overview-title { font-weight: 700; margin-bottom: 0.25rem; }
+.overview ul { margin: 0; padding-left: 1.1rem; color: var(--ink-2); }
 
 .convo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.1rem; }
 .msg { max-width: 44rem; padding-left: 0.9rem; border-left: 3px solid var(--line); }
@@ -147,9 +144,17 @@ p { margin: 0; }
   box-shadow: inset 0 0 0 1px rgb(120 90 120 / 0.12);
   transition: background-color 220ms ease, transform 220ms ease;
 }
-body[data-phase="idle"] .slide:hover .slide-tissue { background: #eedcea; }
-body[data-phase="listening"] .slide-tissue { background: var(--hema); transform: scale(1.03); }
-body[data-phase="listening"] .slide-state { color: var(--hema); }
+body[data-phase="off"] .slide:hover .slide-tissue { background: #eedcea; }
+body[data-phase="ready"] .slide-tissue { background: var(--hema-soft); box-shadow: inset 0 0 0 2px var(--hema-light); }
+body[data-phase="ready"] .slide-state { color: var(--hema); }
+/* While hearing someone, the tissue follows their voice (--level is 0..1, set ~50 times a second). */
+body[data-phase="hearing"] .slide-tissue {
+  background: var(--hema);
+  opacity: calc(0.55 + var(--level, 0) * 0.45);
+  transform: scale(calc(1 + var(--level, 0) * 0.06));
+  transition: transform 60ms linear, opacity 60ms linear;
+}
+body[data-phase="hearing"] .slide-state { color: var(--hema); }
 body[data-phase="thinking"] .slide-tissue {
   background: linear-gradient(120deg, var(--hema-light), var(--eosin));
   animation: stain 1.6s ease-in-out infinite alternate;
@@ -245,5 +250,5 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
 @media (prefers-reduced-motion: reduce) {
   .slide-tissue { transition: none; }
   body[data-phase="thinking"] .slide-tissue { animation: none; opacity: 0.8; }
-  body[data-phase="listening"] .slide-tissue { transform: none; }
+  body[data-phase="hearing"] .slide-tissue { transform: none; }
 }
