@@ -1,5 +1,9 @@
 # LabVoice AI
 
+
+https://github.com/user-attachments/assets/1dd61e7f-9670-45ad-9bbf-647086771678
+
+
 **A hands-free assistant for histology lab benches.** 
 
 > **Thesis:** can a small, locally hosted model safely operate lab systems by voice?
