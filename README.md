@@ -1,3 +1,5 @@
+# LabVoice AI
+
 **A hands-free assistant for histology lab benches.** 
 
 > **Thesis:** can a small, locally hosted model safely operate lab systems by voice?

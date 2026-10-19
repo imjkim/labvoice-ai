@@ -1,4 +1,4 @@
-// VoiceOps bench client: hold-to-talk, spoken answers with barge-in, the agent's steps,
+// LabVoice AI bench client: hold-to-talk, spoken answers with barge-in, the agent's steps,
 // and the approval queue. Model output is untrusted, so it only ever reaches the page via
 // textContent, never innerHTML.
 
@@ -23,7 +23,7 @@ const QUEUE_POLL_MS = 4000;
 
 const state = {
   phase: "idle",
-  userId: store.get("voiceops.user") || "mchen",
+  userId: store.get("labvoice.user") || "mchen",
   sessionId: null,
   abort: null,
   users: [],
@@ -75,7 +75,7 @@ function micErrorMessage(err) {
 function addMessage(role, text, meta = "") {
   $("empty").hidden = true;
   const item = el("li", { className: `msg msg-${role}` }, [
-    el("p", { className: "msg-who", text: { you: "You", assistant: "VoiceOps", note: "Approvals" }[role] }),
+    el("p", { className: "msg-who", text: { you: "You", assistant: "LabVoice", note: "Approvals" }[role] }),
     el("p", { className: "msg-text", text }),
     el("p", { className: "msg-meta", text: meta }),
   ]);
@@ -386,7 +386,7 @@ function wire() {
   $("new-convo").addEventListener("click", resetConversation);
   $("user-select").addEventListener("change", (e) => {
     state.userId = e.target.value;
-    store.set("voiceops.user", state.userId);
+    store.set("labvoice.user", state.userId);
     const user = state.users.find((u) => u.id === state.userId);
     if (user) setStatus(`Now acting as ${user.name} (${user.role.replaceAll("_", " ")}).`);
     refreshQueue();

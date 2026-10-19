@@ -94,7 +94,7 @@ def test_approver_is_recorded_in_the_lims_audit_trail():
         agent, res = await propose(host, store, ORDER, TECH)
         await agent.resolve_action(res.pending_actions[0]["action_id"], approve=True, by=PATH)
         spec = (await host.call("lims__get_specimen", {"accession": STAR})).data
-        expected = "Dr. Carmen Ruiz (pathologist) via VoiceOps"
+        expected = "Dr. Carmen Ruiz (pathologist) via LabVoice"
         assert spec["recent_events"][0]["actor"] == expected
         assert spec["stain_orders"][-1]["ordered_by"] == expected
     run(body)
@@ -110,7 +110,7 @@ def test_model_cannot_set_the_actor():
         assert "actor" not in res.pending_actions[0]["args"]
         await agent.resolve_action(res.pending_actions[0]["action_id"], approve=True, by=SUP)
         spec = (await host.call("lims__get_specimen", {"accession": STAR})).data
-        assert spec["stain_orders"][-1]["ordered_by"] == "D. Reyes (supervisor) via VoiceOps"
+        assert spec["stain_orders"][-1]["ordered_by"] == "D. Reyes (supervisor) via LabVoice"
     run(body)
 
 

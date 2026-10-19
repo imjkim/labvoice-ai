@@ -48,7 +48,7 @@ async def _warm_up(llm: OpenAICompatLLM) -> None:
         log.warning("Model warm-up skipped: %s", exc)
 
 
-app = FastAPI(title="VoiceOps", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="LabVoice AI", version="0.4.0", lifespan=lifespan)
 api = APIRouter(prefix="/api")
 
 

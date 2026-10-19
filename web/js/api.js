@@ -1,4 +1,4 @@
-// Thin client for the VoiceOps JSON API. Every request carries the demo identity (X-User).
+// Thin client for the LabVoice AI JSON API. Every request carries the demo identity (X-User).
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -22,7 +22,7 @@ export function createApi(getUserId) {
       res = await fetch(`/api${path}`, { method, headers, body, signal });
     } catch (err) {
       if (err.name === "AbortError") throw err;
-      throw new ApiError(0, "Can't reach the VoiceOps server. Is it running?");
+      throw new ApiError(0, "Can't reach the LabVoice server. Is it running?");
     }
     const data = await res.json().catch(() => null);
     if (!res.ok) {

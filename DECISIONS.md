@@ -77,8 +77,8 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Consequences:** Not authentication. A real deployment takes identity from the lab's SSO (OIDC/SAML) and roles from its directory; the policy and enforcement points stay the same.
 
 ### D14. The approver is written into the system of record
-- **Context:** A LIMS audit trail that says "VoiceOps did it" is useless to a lab director or an inspector.
-- **Decision:** Write tools take an `actor` parameter that only the host sets (hidden from the model's schema and stripped from model arguments, like `dry_run`). On execution the host passes the approving human, and the LIMS records "Dr. Carmen Ruiz (pathologist) via VoiceOps" on the event, the stain order, and the instrument log.
+- **Context:** A LIMS audit trail that says "the assistant did it" is useless to a lab director or an inspector.
+- **Decision:** Write tools take an `actor` parameter that only the host sets (hidden from the model's schema and stripped from model arguments, like `dry_run`). On execution the host passes the approving human, and the LIMS records "Dr. Carmen Ruiz (pathologist) via LabVoice" on the event, the stain order, and the instrument log.
 - **Consequences:** The model can't forge attribution (tested).
 
 ### D15. A non-thinking model for the voice path
