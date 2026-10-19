@@ -35,7 +35,7 @@
 html { font-size: 100%; }
 body {
   margin: 0;
-  min-height: 100dvh;
+  height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr auto;
   background: var(--glass);
@@ -75,6 +75,7 @@ p { margin: 0; }
   gap: 1.5rem;
   padding: 1.5rem;
   min-height: 0;
+  overflow: hidden;         /* the conversation and side panels scroll; the talk button stays put */
 }
 .talk { display: flex; flex-direction: column; min-height: 0; }
 .convo-scroll { flex: 1; overflow-y: auto; min-height: 12rem; padding-right: 0.25rem; }
@@ -103,6 +104,10 @@ p { margin: 0; }
 .msg.is-pending .msg-text { color: var(--slate); }
 .msg.is-interrupted { opacity: 0.6; }
 .msg.is-waiting .msg-meta { color: var(--amber); font-weight: 700; }
+.msg.is-resolved .msg-meta { color: var(--green); font-weight: 700; }
+.msg-note { border-left-color: var(--amber); }
+.msg-note .msg-who { color: var(--amber); }
+.msg-note .msg-text { font-size: var(--step-0); }
 
 /* --------------------------------------------- the talk button: a glass slide */
 .controls { display: flex; flex-direction: column; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
@@ -134,13 +139,15 @@ p { margin: 0; }
 .slide-hint { font-size: var(--small); color: var(--ink-2); }
 .slide-tissue {
   flex: 1;
-  margin: 14% 12%;
+  align-self: center;
+  height: 64%;
+  margin: 0 11%;            /* horizontal only: vertical % margins resolve against width */
   border-radius: 46% 54% 41% 59% / 52% 38% 62% 48%;   /* a section of tissue, not a circle */
   background: #f3e9ef;
   box-shadow: inset 0 0 0 1px rgb(120 90 120 / 0.12);
   transition: background-color 220ms ease, transform 220ms ease;
 }
-.slide:hover .slide-tissue { background: #eedcea; }
+body[data-phase="idle"] .slide:hover .slide-tissue { background: #eedcea; }
 body[data-phase="listening"] .slide-tissue { background: var(--hema); transform: scale(1.03); }
 body[data-phase="listening"] .slide-state { color: var(--hema); }
 body[data-phase="thinking"] .slide-tissue {
@@ -227,7 +234,8 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
 
 /* ------------------------------------------------------------ small screens */
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; padding: 1rem; }
+  body { height: auto; min-height: 100dvh; }
+  .layout { grid-template-columns: 1fr; padding: 1rem; overflow: visible; }
   .topbar, .footer { padding-left: 1rem; padding-right: 1rem; }
   .who select { min-width: 0; }
   .slide { max-width: none; }

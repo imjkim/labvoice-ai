@@ -5,6 +5,7 @@ Run:  uvicorn voiceops.api:app      then open http://127.0.0.1:8000
 from __future__ import annotations
 
 import asyncio
+import logging
 import mimetypes
 import os
 import tempfile
@@ -25,14 +26,26 @@ from voiceops.llm import OpenAICompatLLM
 from voiceops.mcp_host import MCPHost
 
 WEB_DIR = ROOT / "web"
+log = logging.getLogger("uvicorn.error")  # shows up in the uvicorn console
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # MCP servers are started and stopped in this same task (required by anyio-based transports).
     async with MCPHost(default_servers()) as host:
-        app.state.agent = Agent(llm=OpenAICompatLLM(), host=host, store=Store(settings.db_path))
+        llm = OpenAICompatLLM()
+        app.state.agent = Agent(llm=llm, host=host, store=Store(settings.db_path))
+        warm = asyncio.create_task(_warm_up(llm))  # don't block startup on it
         yield
+        warm.cancel()
+
+
+async def _warm_up(llm: OpenAICompatLLM) -> None:
+    try:
+        ms = await llm.warm_up()
+        log.info("Model %s warmed up in %.0f ms", llm.model, ms)
+    except Exception as exc:  # Ollama not running yet: the first real request will report it
+        log.warning("Model warm-up skipped: %s", exc)
 
 
 app = FastAPI(title="VoiceOps", version="0.3.0", lifespan=lifespan)

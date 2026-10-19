@@ -75,7 +75,7 @@ function micErrorMessage(err) {
 function addMessage(role, text, meta = "") {
   $("empty").hidden = true;
   const item = el("li", { className: `msg msg-${role}` }, [
-    el("p", { className: "msg-who", text: role === "you" ? "You" : "VoiceOps" }),
+    el("p", { className: "msg-who", text: { you: "You", assistant: "VoiceOps", note: "Approvals" }[role] }),
     el("p", { className: "msg-text", text }),
     el("p", { className: "msg-meta", text: meta }),
   ]);
@@ -131,6 +131,7 @@ async function runTurn(call, { spokenInput, typedText }) {
     const answer = addMessage("assistant", turn.answer, waiting ? "waiting for approval" : "");
     if (waiting) {
       answer.classList.add("is-waiting");
+      answer.dataset.actions = turn.pending_actions.map((a) => a.action_id).join(" ");
       refreshQueue();
     }
     renderTrace(turn.trace, sttMs);
@@ -260,9 +261,7 @@ function renderAction(a) {
     error.textContent = "";
     try {
       const out = await api.decide(a.action_id, decision);
-      const verb = decision === "approve" ? (out.status === "executed" ? "Done" : "Approved, but it failed") : "Cancelled";
-      setStatus(`${verb}: ${summary}`);
-      if (out.status === "failed" && out.result?.error) setStatus(`Not done: ${out.result.error}`, { error: true });
+      showDecision(a, summary, decision, out);
       refreshQueue();
     } catch (err) {
       error.textContent = err.message;
@@ -294,6 +293,32 @@ function renderAction(a) {
     buttons.length ? el("div", { className: "card-actions" }, buttons) : null,
     error,
   ]);
+}
+
+/** Put the outcome of an approval where people are looking: in the conversation. */
+function showDecision(action, summary, decision, out) {
+  const who = state.users.find((u) => u.id === state.userId)?.name || "Someone";
+  const withdrawn = decision === "deny" && action.requested_by === state.userId;
+  let line;
+  let meta;
+  if (decision === "approve" && out.status === "executed") {
+    line = `${who} approved: ${summary}. Done.`;
+    meta = `approved by ${who}, done`;
+  } else if (decision === "approve") {
+    line = `${who} approved: ${summary}, but the LIMS refused it: ${out.result?.error || "unknown error"}`;
+    meta = "approved, but not done";
+  } else {
+    line = withdrawn ? `${who} withdrew the request: ${summary}.` : `${who} denied: ${summary}. Nothing was changed.`;
+    meta = withdrawn ? "withdrawn" : `denied by ${who}`;
+  }
+  addMessage("note", line);
+  for (const msg of document.querySelectorAll(".msg.is-waiting")) {
+    if ((msg.dataset.actions || "").split(" ").includes(action.action_id)) {
+      msg.classList.remove("is-waiting");
+      msg.classList.add("is-resolved");
+      updateMessage(msg, { meta });
+    }
+  }
 }
 
 // ------------------------------------------------------------------ setup ---

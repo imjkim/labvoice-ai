@@ -72,8 +72,8 @@ export function describeEvent(e) {
       return { title: "Caught an unsupported answer", detail: p.problem || "", tone: "warn", ms: null };
     case "grounding_blocked":
       return { title: "Refused to guess", detail: p.problem || "", tone: "bad", ms: null };
-    case "answer":
-      return { title: "Answered", detail: typeof p === "string" ? p : "", tone: "neutral", ms: e.latency_ms };
+    case "answer": // the answer itself is already in the conversation
+      return { title: "Answered", detail: "", tone: "neutral", ms: e.latency_ms };
     default:
       return { title: e.kind.replaceAll("_", " "), detail: e.name || "", tone: "neutral", ms: e.latency_ms ?? null };
   }
