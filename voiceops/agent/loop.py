@@ -32,13 +32,15 @@ from voiceops.mcp_host import HOST_ONLY_PARAMS, MCPHost
 
 _YY = f"S{datetime.now().year % 100:02d}"
 
-SYSTEM_PROMPT = f"""You are LabVoice, a hands-free assistant for histology lab staff working at the bench.
+SYSTEM_PROMPT = f"""You are LabVoice, a hands-free voice assistant for histology lab staff working at the bench.
+Your specialty is this lab's work, and you also answer general questions.
 
-- Use the LIMS tools for anything about specimens, stains, instruments or QC. Never guess lab data.
-- For how-to and rules questions (what to do when, how long, how thick, who may approve), call search_sops
-  and answer only from the sections it returns, naming the one you used the way its cite_as says, like
-  "SOP 999, section 2". If coverage is weak, say the SOPs don't cover it; never answer procedures from
-  general knowledge.
+About this lab (its specimens, stains, instruments, QC and its own procedures), look things up; never guess:
+- Use the LIMS tools for anything about this lab's specimens, stains, instruments or QC.
+- For how this lab does something (what to do when, how long, how thick, who may approve), call search_sops
+  and answer from the sections it returns, naming the one you used the way its cite_as says, like
+  "SOP 999, section 2". If coverage is weak, say the SOPs don't cover it. You may then add general
+  background, but say plainly that it's general practice, not this lab's procedure.
 - When a question needs both (for example why a case is stuck and what to do about it), check the LIMS
   first, then search the SOPs for the procedure that applies.
 - Staff usually say only the last digits of an accession (like "4821"). That is enough to act on: pass exactly
@@ -53,8 +55,14 @@ SYSTEM_PROMPT = f"""You are LabVoice, a hands-free assistant for histology lab s
   Never say an action was done unless a tool result confirms it.
 - If a tool returns an error, say briefly what failed. If a request is ambiguous, ask one short question.
 - You don't interpret results or make diagnoses: for clinical questions, say that's the pathologist's call.
-  Politely decline requests unrelated to the lab.
 - You never have patient names or identifiers, and must not ask for them.
+
+General questions (histology and pathology basics, healthcare and lab regulation such as CLIA, CAP, FDA or
+HIPAA at an overview level, science, everyday questions): answer briefly from general knowledge, without
+tools and without mentioning this lab's data. For regulatory or compliance questions about the user's own
+company, give the basics and suggest confirming specifics with their compliance or quality team.
+You can't browse the internet: for live information such as weather, news or prices, say you can't look
+that up from here.
 """
 
 
@@ -62,6 +70,11 @@ SYSTEM_PROMPT = f"""You are LabVoice, a hands-free assistant for histology lab s
 # Observed failure: with no tool call at all, the model answered "S26-00312 is overdue and blocked
 # by a labeling discrepancy" (false). A prompt rule can't make this impossible; this check can.
 _IDS = re.compile(r"\bS\d{2}-\d{5}\b|\b[A-Z]{2,3}-\d{2}\b")  # accessions, instrument IDs
+# Check (3) applies to questions about this lab's things. "What's CLIA?" may be answered from general
+# knowledge even if the answer says "quality control"; "why isn't 312 ready?" may not.
+_LAB_REFERENCE = re.compile(
+    r"\b(S\d{2}-\d+|\d{3,5}|[A-Z]{2,3}-\d{2}|specimens?|cases?|blocks?|slides?|accessions?|stainers?|"
+    r"processors?|microtomes?|coverslippers?|instruments?|machines?|LIMS|SOPs?|STAT|overdue|flagged|QC)\b", re.I)
 _LAB_FACTS = re.compile(
     r"\b(overdue|blocked|flagged|qc|quality control|stain(?:ed|ing)?|processing|signed out|on hold|"
     r"maintenance|offline|in progress|slides? ready|under review|embedded|sectioned|grossed|sop|procedure)\b",
@@ -77,12 +90,14 @@ GROUNDING_NUDGE = (
 UNGROUNDED_FALLBACK = "I couldn't confirm that in the LIMS, so I won't guess. Could you ask again?"
 
 
-def grounding_problem(answer: str, evidence: list[str]) -> str | None:
+def grounding_problem(answer: str, evidence: list[str], question: str | None = None) -> str | None:
     """Return why `answer` isn't backed by this turn's tool results, or None if it is.
 
     Three checks: (1) every accession or instrument ID named in the answer must appear in a tool
     result from this turn; (2) every SOP section it cites must have been returned by a search in
-    this turn; (3) an answer that states lab facts needs at least one tool result.
+    this turn; (3) an answer that states lab facts needs at least one tool result, when the question
+    is about this lab's things (or when the question isn't known). (1) and (2) always apply: a general
+    answer may not name a specimen or cite an SOP it never looked up.
     Facts from earlier turns don't count: lab state changes, so each answer re-reads it."""
     blob = "\n".join(evidence).replace("\\u00a7", "§")  # tool results are JSON with ASCII escapes
     missing = sorted({i for i in _IDS.findall(answer) if i not in blob})
@@ -92,7 +107,8 @@ def grounding_problem(answer: str, evidence: list[str]) -> str | None:
         cite = f"SOP-{number} §{int(section)}" if section else f"SOP-{number}"
         if cite not in blob:
             return f"cites {cite}, which no SOP search in this turn returned"
-    if not evidence and _LAB_FACTS.search(answer):
+    about_lab = question is None or bool(_LAB_REFERENCE.search(question))
+    if about_lab and not evidence and _LAB_FACTS.search(answer):
         return "states lab facts without calling any tool"
     return None
 
@@ -144,7 +160,7 @@ class Agent:
                   payload={"tool_calls": [c.name for c in reply.tool_calls], "usage": reply.usage})
 
             if not reply.tool_calls:
-                problem = grounding_problem(reply.content, evidence)
+                problem = grounding_problem(reply.content, evidence, user_text)
                 if problem and nudge is None:
                     # The model answered about lab data it never looked up. Don't keep that answer;
                     # tell it what's wrong and give it one chance to check.

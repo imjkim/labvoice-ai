@@ -149,6 +149,13 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Browser rule:** Browsers may hold audio back until the page gets a click or key press. Chrome doesn't once the page is capturing the microphone, but for stricter browsers the slide says "click anywhere on the page to start", and the first click anywhere starts it. Esc still stops speech without a camera.
 - **Rejected:** A wake word ("Hey LabVoice"): needs an always-running keyword model and fails in exactly the noisy rooms where hands are busy. Mute by voice ("stop listening"): the one thing it can't hear is "start listening".
 
+### D26. General questions are in scope; lab facts still need a lookup
+- **Context:** The prompt said to decline anything unrelated to the lab, so in live use it refused "give me the basics of FDA oversight for lab tests" and "general information about the healthcare industry". That was never the goal: LabVoice specializes in this lab, and a general model underneath can answer general questions.
+- **Decision:** Three kinds of question. This lab's data and procedures: look them up (LIMS, SOPs), never guess. General knowledge (histology and pathology basics, CLIA, CAP, FDA and HIPAA at an overview level, everyday questions): answer briefly from the model's knowledge, without tools; for the user's own company's compliance, give the basics and point to their compliance or quality team. Live information (weather, news, prices): say it can't look that up, since there's no internet tool. When the SOPs don't cover a lab question, it says so and may add general practice, labeled as general.
+- **Grounding guard:** "States lab facts without a tool call" now depends on the question, not just the answer. It applies when the question mentions this lab's things (an accession or number, an instrument, specimen, slide, block, case, QC, SOP, STAT). "What's CLIA?" can be answered with the words "quality control" in it; "why isn't 312 ready?" can't be answered without a lookup. The other two checks are unchanged for every answer: a general answer still can't name a specimen or instrument, or cite an SOP section, that no tool returned.
+- **Evals:** The `off-topic` case (expecting a refusal) is replaced by `live-weather`, and three general-knowledge cases are added (`general-clia`, `general-he`, `general-fda`), each expecting no tool calls.
+- **Also:** Whisper now loads and runs once on silence at startup, like the chat model (D20): the first spoken question took 7.2 s in live use, the next ones about 0.5 s.
+
 ---
 
 ## Open questions

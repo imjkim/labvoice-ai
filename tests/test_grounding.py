@@ -48,6 +48,22 @@ def test_grounding_problem(answer, evidence, bad):
     assert (grounding_problem(answer, evidence) is not None) == bad
 
 
+@pytest.mark.parametrize("question,answer,evidence,bad", [
+    # General questions may be answered from general knowledge, even with lab words in the answer.
+    ("What's CLIA?", "CLIA sets federal quality standards, including quality control, for clinical labs.", [], False),
+    ("What does H&E staining show?", "Hematoxylin stains nuclei blue; eosin stains cytoplasm pink.", [], False),
+    ("My company is going through FDA regulations, any basics?", "FDA oversees lab tests as devices; QC procedures matter.", [], False),
+    # Questions about this lab's things still need a lookup.
+    ("Why isn't 312 ready?", "It's waiting on a HER2 stain.", [], True),
+    ("Is the IHC stainer down?", "Yes, it's on QC hold.", [], True),
+    # And a general answer still can't name a specimen or cite an SOP it never looked up.
+    ("What's CLIA?", "CLIA covers labs like ours; see SOP 420.", [], True),
+    ("Tell me about stains", "S26-00312 had a HER2 stain.", [], True),
+])
+def test_general_questions_are_judged_by_the_question(question, answer, evidence, bad):
+    assert (grounding_problem(answer, evidence, question) is not None) == bad
+
+
 def test_confabulated_answer_is_retried_with_a_tool_call():
     async def body(host, store):
         llm = ScriptedLLM([
