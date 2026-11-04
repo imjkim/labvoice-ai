@@ -72,8 +72,11 @@ The model is loaded at startup so the first question isn't slow. Ollama unloads 
 
 Open http://localhost:8000, click the slide once to turn the microphone on, and allow it. From then on
 it's hands-free: ask "Why isn't 312 ready yet?" and pause; it detects when you start and stop talking.
-Ask it to order a stain, then switch **You are** to D. Reyes (supervisor) to approve it. Press Esc or
-click the slide to stop it mid-answer.
+Ask it to order a stain, then switch **You are** to D. Reyes (supervisor) to approve it.
+
+To stop it mid-answer without touching anything, click **Use camera** and raise your index finger while
+it talks; it stops and listens. Hand tracking runs in the browser (MediaPipe) and video never leaves the
+page. Esc or a click on the slide also works.
 
 ```bash
 python -m pytest -q                # agent, LIMS server, roles, grounding (Python)

@@ -50,6 +50,11 @@
           <input id="type-input" type="text" placeholder="Or type a question" autocomplete="off">
           <button type="submit" class="btn">Ask</button>
         </form>
+        <div id="gesture" class="gesture" data-state="off" data-hand="none">
+          <video id="cam" class="gesture-cam" muted playsinline aria-hidden="true"></video>
+          <p id="gesture-text" class="gesture-text" aria-live="polite"></p>
+          <button id="gesture-toggle" type="button" class="btn" aria-pressed="false">Use camera</button>
+        </div>
         <div class="controls-row">
           <p id="status" class="status" role="status" aria-live="polite"></p>
           <button id="new-convo" type="button" class="btn-link">New conversation</button>

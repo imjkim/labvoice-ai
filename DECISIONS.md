@@ -125,6 +125,14 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Phantom transcripts:** Always-on listening sends coughs and clatter to Whisper, which tends to "hear" stock phrases ("Thank you.") or echo its vocabulary prompt. The server drops segments Whisper scores as non-speech, whole-transcript phantom phrases, and prompt echoes; an empty transcript quietly returns to listening.
 - **Rejected:** A neural VAD (e.g. Silero) in the browser. More accurate in noise, but it needs a model runtime and download, and the energy detector is small, offline and unit-tested with synthetic audio. Revisit if false triggers in a real lab are a problem.
 
+### D23. A raised index finger stops the assistant
+- **Context:** Listening pauses while the assistant speaks (D22), so a person at the bench couldn't cut it off without touching the keyboard or screen, which is the thing gloved hands can't do.
+- **Decision:** An optional camera runs MediaPipe's hand Gesture Recognizer in the browser at 15 frames a second. A raised index finger, held for 200 ms, stops the answer (or cancels one still being prepared) and listening resumes at once, without the usual 300 ms settle, because people who interrupt start talking right away. A frame counts if MediaPipe's own `Pointing_Up` is confident (score >= 0.6) or if a geometric check on the 21 hand landmarks agrees: index tip well beyond its middle joint and within 35 degrees of vertical, the other three fingers folded, measured in real proportions rather than stretched image coordinates. The check and the hold-then-fire-once logic are pure functions with unit tests (`web/js/gesture.test.js`).
+- **Why either signal, not both:** The gesture only does anything while the assistant is talking or thinking, so a false positive costs one cut-off sentence, while a missed gesture leaves the person unable to interrupt. The 200 ms hold and the one-fire-per-raise rule keep it from triggering on a passing hand.
+- **Privacy:** Video frames never leave the page; only the decision "a finger is up" reaches the app. The preview is mirrored and small, and its frame changes color when a hand or the gesture is seen, so people can tell what the camera is doing.
+- **Rejected:** Recognizing gestures on the server with OpenCV (sends video off the device and adds a network hop to every frame); a stop word (needs a keyword spotter that hears through the assistant's own voice, which browser echo cancellation doesn't reliably remove).
+- **Trade-off:** MediaPipe's runtime and the model (about 8 MB) load from a CDN on first use and are then cached by the browser. A lab without internet would need them served from `web/vendor/`; the URLs are constants at the top of `gesture.js`.
+
 ---
 
 ## Open questions
@@ -132,7 +140,8 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - Structured transient-error signaling from MCP servers instead of a regex.
 - Voice framework (Pipecat / LiveKit Agents) vs hand-rolled streaming + barge-in. Decide with latency numbers, not taste.
 - Cancel the server-side turn when the user interrupts (D21).
-- Voice barge-in during speech: a raised-hand gesture or a stop word (D22).
+- A stop word as a voice-only alternative to the raised-finger stop (D23).
+- Serve the MediaPipe runtime and gesture model locally for offline labs (D23).
 - Streaming answers (speak the first sentence while the rest is generated).
 
 ---

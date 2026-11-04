@@ -167,6 +167,20 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
 .type input {
   flex: 1; padding: 0.55rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
 }
+/* raised-finger stop: a small mirrored preview whose frame shows what the tracker sees */
+.gesture { display: flex; align-items: center; gap: 0.75rem; max-width: 540px; }
+.gesture-text { flex: 1; font-size: var(--small); color: var(--ink-2); }
+.gesture-cam {
+  flex: none; width: 96px; aspect-ratio: 4 / 3; object-fit: cover;
+  transform: scaleX(-1);           /* mirror, so moving your hand right moves it right */
+  border-radius: var(--radius); background: var(--ink);
+  border: 3px solid var(--line);
+  transition: border-color 120ms ease;
+}
+.gesture[data-state="off"] .gesture-cam { display: none; }
+.gesture[data-state="loading"] .gesture-cam { opacity: 0.4; }
+.gesture[data-hand="seen"] .gesture-cam { border-color: var(--hema-light); }
+.gesture[data-hand="up"] .gesture-cam { border-color: var(--eosin); }
 .controls-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; max-width: 540px; }
 .status { font-size: var(--small); color: var(--ink-2); min-height: 1.3em; }
 .status.is-error { color: var(--red); font-weight: 700; }
@@ -244,7 +258,7 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
   .topbar, .footer { padding-left: 1rem; padding-right: 1rem; }
   .who select { min-width: 0; }
   .slide { max-width: none; }
-  .type, .controls-row { max-width: none; }
+  .type, .controls-row, .gesture { max-width: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
