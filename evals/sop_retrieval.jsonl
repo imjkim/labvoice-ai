@@ -1,0 +1,54 @@
+{"id": "qc-fail-steps", "query": "the IHC stainer failed QC this morning, what do I do", "expect": ["SOP-420 \u00a73"], "tags": ["keyword"]}
+{"id": "qc-fail-slang", "query": "IHC-01 flunked its morning check, now what", "expect": ["SOP-420 \u00a73"], "tags": ["paraphrase"]}
+{"id": "qc-hold-patient", "query": "can I still run patient slides on a stainer that's on QC hold", "expect": ["SOP-420 \u00a72"], "tags": ["keyword"]}
+{"id": "qc-hold-slides", "query": "what happens to the slides from the run that failed", "expect": ["SOP-420 \u00a72"], "tags": ["paraphrase"]}
+{"id": "qc-reroute-stat", "query": "the IHC stainer is on hold, where do my STAT HER2 orders go", "expect": ["SOP-420 \u00a74"], "tags": ["keyword"]}
+{"id": "qc-reroute-self", "query": "can I move the HER2 orders over to the other stainer myself", "expect": ["SOP-420 \u00a74"], "tags": ["paraphrase"]}
+{"id": "qc-back-online", "query": "when can IHC-01 go back online", "expect": ["SOP-420 \u00a75", "SOP-610 \u00a72"], "tags": ["keyword"]}
+{"id": "status-who-maint", "query": "who is allowed to put an instrument into maintenance", "expect": ["SOP-610 \u00a72"], "tags": ["keyword"]}
+{"id": "status-who-online", "query": "who signs off on bringing a machine back into service", "expect": ["SOP-610 \u00a72", "SOP-420 \u00a75"], "tags": ["paraphrase"]}
+{"id": "he-down", "query": "the H&E stainer is down, how do I stain my slides", "expect": ["SOP-310 \u00a73"], "tags": ["keyword"]}
+{"id": "he-manual-time", "query": "how long does the hematoxylin go for on the manual line", "expect": ["SOP-310 \u00a73"], "tags": ["keyword"]}
+{"id": "he-eosin-change", "query": "how often do we change the eosin", "expect": ["SOP-310 \u00a74"], "tags": ["keyword"]}
+{"id": "he-control", "query": "what should the morning H&E control slide look like", "expect": ["SOP-310 \u00a72"], "tags": ["keyword"]}
+{"id": "ss-gms-control", "query": "what control tissue do I use for GMS", "expect": ["SOP-320 \u00a72"], "tags": ["keyword"]}
+{"id": "ss-afb-control", "query": "positive control for an acid fast stain", "expect": ["SOP-320 \u00a72"], "tags": ["keyword"]}
+{"id": "ss-pas-control", "query": "PAS control tissue", "expect": ["SOP-320 \u00a72"], "tags": ["keyword"]}
+{"id": "ss-gms-dark", "query": "my GMS came out way too dark", "expect": ["SOP-320 \u00a73"], "tags": ["paraphrase"]}
+{"id": "ss-afb-water", "query": "how do I avoid false positive AFB from tap water", "expect": ["SOP-320 \u00a74"], "tags": ["keyword"]}
+{"id": "ihc-controls", "query": "what controls go on every IHC slide", "expect": ["SOP-410 \u00a72"], "tags": ["keyword"]}
+{"id": "ihc-her2-control", "query": "HER2 control with the 0, 1+ and 3+ cores", "expect": ["SOP-410 \u00a72"], "tags": ["keyword"]}
+{"id": "ihc-weak-control", "query": "the positive control on my ER run was weak, can I release the patient slides", "expect": ["SOP-410 \u00a74"], "tags": ["keyword"]}
+{"id": "ihc-edit-protocol", "query": "can I tweak the antibody protocol to save a faint stain", "expect": ["SOP-410 \u00a73"], "tags": ["paraphrase"]}
+{"id": "fix-breast-time", "query": "how long should a breast biopsy sit in formalin for HER2", "expect": ["SOP-120 \u00a73"], "tags": ["keyword"]}
+{"id": "fix-max", "query": "maximum fixation time for ER and PR testing", "expect": ["SOP-120 \u00a73"], "tags": ["keyword"]}
+{"id": "fix-ratio", "query": "how much formalin per amount of tissue", "expect": ["SOP-120 \u00a72"], "tags": ["paraphrase"]}
+{"id": "fix-decal", "query": "bone specimen that might need IHC, which decal do I use", "expect": ["SOP-120 \u00a75"], "tags": ["keyword"]}
+{"id": "acc-left-right", "query": "requisition says left arm but the container says right, what do I do", "expect": ["SOP-101 \u00a73"], "tags": ["paraphrase"]}
+{"id": "acc-relabel", "query": "can I just fix a wrong label on the container myself", "expect": ["SOP-101 \u00a73"], "tags": ["paraphrase"]}
+{"id": "acc-stat", "query": "how fast do STAT specimens get accessioned", "expect": ["SOP-101 \u00a75"], "tags": ["keyword"]}
+{"id": "acc-ischemia", "query": "the cold ischemia time is missing on a breast specimen", "expect": ["SOP-101 \u00a74", "SOP-120 \u00a73"], "tags": ["keyword"]}
+{"id": "cut-kidney", "query": "how thick do I cut kidney biopsies", "expect": ["SOP-230 \u00a72"], "tags": ["keyword"]}
+{"id": "cut-bath", "query": "what temperature should the water bath be", "expect": ["SOP-230 \u00a72"], "tags": ["keyword"]}
+{"id": "cut-injury", "query": "I sliced my finger on the microtome", "expect": ["SOP-230 \u00a73"], "tags": ["paraphrase"]}
+{"id": "cut-chatter", "query": "my sections keep chattering", "expect": ["SOP-230 \u00a74"], "tags": ["keyword"]}
+{"id": "cut-levels", "query": "the pathologist wants levels, can I cut them without an order", "expect": ["SOP-230 \u00a75"], "tags": ["keyword"]}
+{"id": "proc-alarm", "query": "the processor alarmed in the middle of the run", "expect": ["SOP-210 \u00a73"], "tags": ["keyword"]}
+{"id": "proc-program", "query": "which program do I put a colon resection on", "expect": ["SOP-210 \u00a72"], "tags": ["keyword"]}
+{"id": "proc-rotate", "query": "how often do we rotate the alcohols on the processor", "expect": ["SOP-210 \u00a74"], "tags": ["keyword"]}
+{"id": "tat-stat-stuck", "query": "a STAT case has been stuck three hours because of the stainer, who do I tell", "expect": ["SOP-510 \u00a73", "SOP-420 \u00a74"], "tags": ["keyword"]}
+{"id": "tat-routine", "query": "what's the turnaround for a routine biopsy", "expect": ["SOP-510 \u00a71"], "tags": ["keyword"]}
+{"id": "tat-call-clinic", "query": "can I phone the clinic to tell them the case is running late", "expect": ["SOP-510 \u00a74"], "tags": ["paraphrase"]}
+{"id": "tat-overdue-review", "query": "who goes through the overdue list", "expect": ["SOP-510 \u00a72"], "tags": ["keyword"]}
+{"id": "cs-jam", "query": "the coverslipper jammed", "expect": ["SOP-610 \u00a74"], "tags": ["keyword"]}
+{"id": "rel-barcode", "query": "the barcode on the slide doesn't match the block", "expect": ["SOP-710 \u00a72"], "tags": ["keyword"]}
+{"id": "rel-partial", "query": "can I send out a case before all the slides are done", "expect": ["SOP-710 \u00a73"], "tags": ["paraphrase"]}
+{"id": "rel-fold", "query": "there's a fold through the tissue on my slide, can it go out", "expect": ["SOP-710 \u00a71"], "tags": ["keyword"]}
+{"id": "neg-frozen", "query": "how do I run a frozen section", "expect": [], "tags": ["negative"]}
+{"id": "neg-dress", "query": "what's the dress code in the lab", "expect": [], "tags": ["negative"]}
+{"id": "neg-centrifuge", "query": "how do I calibrate the centrifuge", "expect": [], "tags": ["negative"]}
+{"id": "neg-pto", "query": "how many vacation days do I get", "expect": [], "tags": ["negative"]}
+{"id": "neg-pap", "query": "how do I stain a Pap smear", "expect": [], "tags": ["negative", "hard-negative"]}
+{"id": "neg-her2-score", "query": "what's the cutoff for calling HER2 positive", "expect": [], "tags": ["negative", "hard-negative"]}
+{"id": "neg-lunch", "query": "can you order lunch for the team", "expect": [], "tags": ["negative"]}
+{"id": "neg-password", "query": "what's the password for the stainer computer", "expect": [], "tags": ["negative", "hard-negative"]}

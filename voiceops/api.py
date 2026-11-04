@@ -36,8 +36,20 @@ async def lifespan(app: FastAPI):
         llm = OpenAICompatLLM()
         app.state.agent = Agent(llm=llm, host=host, store=Store(settings.db_path))
         warm = asyncio.create_task(_warm_up(llm))  # don't block startup on it
+        warm_stt = asyncio.create_task(_warm_up_stt())
         yield
         warm.cancel()
+        warm_stt.cancel()
+
+
+async def _warm_up_stt() -> None:
+    from voiceops import stt
+
+    try:
+        ms = await asyncio.to_thread(stt.warm_up)
+        log.info("Speech to text ready on %s in %.0f ms", stt.device(), ms)
+    except Exception as exc:  # faster-whisper missing or broken: the first voice request will report it
+        log.warning("Speech-to-text warm-up skipped: %s", exc)
 
 
 async def _warm_up(llm: OpenAICompatLLM) -> None:

@@ -38,9 +38,30 @@ def run(body):
     ("That's the pathologist's call, not mine.", [], False),
     ("Sorry, I can only help with lab work.", [], False),
     ("Do you mean IHC stainer 1 or 2?", [], False),
+    # SOP citations: only sections a search in this turn returned (tool JSON escapes "§").
+    ("Per SOP 420, section 3, repeat QC with fresh controls.", ['{"citation": "SOP-420 \\u00a73"}'], False),
+    ("Per SOP 420, section 4, the supervisor reroutes STAT work.", ['{"citation": "SOP-420 \\u00a73"}'], True),
+    ("SOP 999 says to call the vendor.", ['{"citation": "SOP-420 \\u00a73"}'], True),
+    ("The procedure is to repeat QC with fresh controls.", [], True),     # procedure from memory
 ])
 def test_grounding_problem(answer, evidence, bad):
     assert (grounding_problem(answer, evidence) is not None) == bad
+
+
+@pytest.mark.parametrize("question,answer,evidence,bad", [
+    # General questions may be answered from general knowledge, even with lab words in the answer.
+    ("What's CLIA?", "CLIA sets federal quality standards, including quality control, for clinical labs.", [], False),
+    ("What does H&E staining show?", "Hematoxylin stains nuclei blue; eosin stains cytoplasm pink.", [], False),
+    ("My company is going through FDA regulations, any basics?", "FDA oversees lab tests as devices; QC procedures matter.", [], False),
+    # Questions about this lab's things still need a lookup.
+    ("Why isn't 312 ready?", "It's waiting on a HER2 stain.", [], True),
+    ("Is the IHC stainer down?", "Yes, it's on QC hold.", [], True),
+    # And a general answer still can't name a specimen or cite an SOP it never looked up.
+    ("What's CLIA?", "CLIA covers labs like ours; see SOP 420.", [], True),
+    ("Tell me about stains", "S26-00312 had a HER2 stain.", [], True),
+])
+def test_general_questions_are_judged_by_the_question(question, answer, evidence, bad):
+    assert (grounding_problem(answer, evidence, question) is not None) == bad
 
 
 def test_confabulated_answer_is_retried_with_a_tool_call():
@@ -86,4 +107,30 @@ def test_grounded_and_non_lab_answers_pass_untouched():
         llm = ScriptedLLM([AssistantMessage(content="You're welcome!")])
         res = await Agent(llm, host, store).run_turn("thanks")
         assert res.answer == "You're welcome!" and len(llm.requests) == 1
+    run(body)
+
+
+def test_lims_plus_sop_answer_with_a_real_citation_passes():
+    async def body(host, store):
+        llm = ScriptedLLM([
+            AssistantMessage(tool_calls=[call("lims__get_instrument", {"instrument": "IHC stainer one"})]),
+            AssistantMessage(tool_calls=[call("sops__search_sops", {"question": "IHC stainer failed QC what to do"}, id="c2")]),
+            AssistantMessage(content="IHC-01 is on QC hold. Per SOP 420, section 3, replace reagents and repeat QC."),
+        ])
+        res = await Agent(llm, host, store).run_turn("IHC stainer one failed QC, what do I do?")
+        assert res.answer.startswith("IHC-01 is on QC hold. Per SOP 420, section 3")
+        assert "grounding_retry" not in [e["kind"] for e in res.trace]
+    run(body)
+
+
+def test_citing_a_section_the_search_did_not_return_is_retried():
+    async def body(host, store):
+        llm = ScriptedLLM([
+            AssistantMessage(tool_calls=[call("sops__search_sops", {"question": "coverslipper jammed"})]),
+            AssistantMessage(content="Per SOP 610, section 9, reboot it."),        # no such section
+            AssistantMessage(content="Per SOP 610, section 4, stop it and check every slide in the rack."),
+        ])
+        res = await Agent(llm, host, store).run_turn("The coverslipper jammed")
+        assert res.answer.startswith("Per SOP 610, section 4")
+        assert "grounding_retry" in [e["kind"] for e in res.trace]
     run(body)

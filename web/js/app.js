@@ -1,9 +1,11 @@
-// LabVoice AI bench client: hands-free listening, spoken answers, the agent's steps, and the
+// LabVoice AI bench client: always-on listening, spoken answers, hand signals (index finger:
+// stop talking; thumbs down: stop listening; thumbs up: listen again), the agent's steps, and the
 // approval queue. Model output is untrusted, so it only ever reaches the page via
 // textContent, never innerHTML.
 
 import { ApiError, createApi } from "./api.js";
 import { describeEvent, formatArgs, formatMs, latencySegments, toolLabel, totalMs } from "./timeline.js";
+import { GestureWatcher } from "./gesture.js";
 import { HandsFreeListener } from "./listener.js";
 import { Speaker } from "./voice.js";
 
@@ -14,11 +16,22 @@ const store = {
 };
 
 const PHASES = {
-  off: ["Microphone off", "click to start listening"],
+  off: ["Microphone off", "click anywhere on the page to start"],
+  paused: ["Not listening", "thumbs up when you want me back"],
   ready: ["Listening", "just ask your question"],
   hearing: ["Hearing you", "pause when you're done"],
   thinking: ["Checking the LIMS", "speak again to start over"],
-  speaking: ["Speaking", "press Esc or click to stop"],
+  speaking: ["Speaking", "press Esc to stop"],
+};
+const SPEAKING_HINT_WITH_CAMERA = "raise your index finger or press Esc to stop";
+
+// What the side panel says for each hand signal.
+const SIGNAL_TEXT = {
+  idle: ["✋", "Watching for hand signals", "👍 listen · 👎 stop listening · ☝️ stop talking"],
+  off: ["✋", "Camera off", "Turn on the camera to use hand signals."],
+  thumb_up: ["👍", "Listening", "Thumbs up: I'm listening for you."],
+  thumb_down: ["👎", "Not listening", "Thumbs down: I've stopped listening. Thumbs up when you want me back."],
+  index_up: ["☝️", "Stopped talking", "Index finger: I stopped talking."],
 };
 const QUEUE_POLL_MS = 4000;
 const RESUME_AFTER_SPEECH_MS = 300; // let the room settle before listening again
@@ -29,6 +42,8 @@ const state = {
   sessionId: null,
   abort: null,
   users: [],
+  largePreview: false,
+  muted: false, // the person asked us to stop listening (thumbs down) until they say otherwise
 };
 const api = createApi(() => state.userId);
 const speaker = new Speaker();
@@ -42,10 +57,20 @@ const listener = new HandsFreeListener({
     runTurn((signal) => api.voice(blob, filename, state.sessionId, signal), { spokenInput: true }),
   onLevel: (level) => document.body.style.setProperty("--level", level.toFixed(2)),
 });
+const gestures = new GestureWatcher({
+  onGesture: onHandSignal,
+  onState: ({ hand, signal }) => setHand(signal ? "sign" : hand ? "seen" : "none"),
+});
 
 /** The phase to return to when nothing is happening. */
 function restPhase() {
-  return listener.active ? "ready" : "off";
+  if (!listener.active || !listener.running) return "off";
+  return state.muted ? "paused" : "ready";
+}
+
+/** Listen again after speaking or an interruption, unless the person turned listening off. */
+function resumeListening() {
+  if (!state.muted) listener.resume();
 }
 
 // ---------------------------------------------------------------- helpers ---
@@ -63,8 +88,7 @@ function setPhase(phase) {
   document.body.dataset.phase = phase;
   const [label, hint] = PHASES[phase];
   $("talk-state").textContent = label;
-  $("talk-hint").textContent = hint;
-  $("talk").setAttribute("aria-pressed", String(listener.active));
+  $("talk-hint").textContent = phase === "speaking" && gestures.active ? SPEAKING_HINT_WITH_CAMERA : hint;
 }
 
 let statusTimer = null;
@@ -160,7 +184,7 @@ async function runTurn(call, { spokenInput, typedText }) {
       onstart: () => renderTrace(turn.trace, sttMs, performance.now() - respondedAt),
       onend: () => {
         setTimeout(() => {
-          listener.resume();
+          resumeListening();
           if (state.phase === "speaking") setPhase(restPhase());
         }, RESUME_AFTER_SPEECH_MS);
       },
@@ -182,6 +206,10 @@ async function runTurn(call, { spokenInput, typedText }) {
   }
 }
 
+/**
+ * The microphone is always on: it starts with the page. Browsers hold audio back until the first
+ * click or key press, so until then the slide says "click anywhere on the page to start".
+ */
 async function startListening() {
   if (!listener.supported) {
     setStatus("This browser can't use the microphone. Type your question instead.", { error: true });
@@ -189,28 +217,151 @@ async function startListening() {
   }
   try {
     await listener.start();
-    setPhase("ready");
+    if (state.muted) listener.pause();
   } catch (err) {
     await listener.stop();
-    setStatus(micErrorMessage(err), { error: true });
-    setPhase("off");
+    setStatus(micErrorMessage(err), { error: true, sticky: true });
   }
+  setPhase(restPhase());
 }
 
-async function stopListening() {
-  await listener.stop();
-  if (state.phase === "ready" || state.phase === "hearing") setPhase("off");
+/** First click or key press anywhere: let audio run (and retry a microphone that failed). */
+async function onFirstInteraction() {
+  if (!listener.active) await startListening();
+  else if (!listener.running) await listener.unlock().catch(() => {});
+  if (listener.running && state.phase === "off") setPhase(restPhase());
 }
 
-/** Stop the assistant mid-answer. A gesture or a stop word can call this later. */
+/** Stop the assistant mid-answer. */
 function stopSpeaking() {
   if (state.phase === "speaking") speaker.cancel(); // onend resumes listening
 }
 
-function onSlideClick() {
-  if (state.phase === "off") startListening();
-  else if (state.phase === "speaking") stopSpeaking();
-  else if (state.phase === "ready" || state.phase === "hearing") stopListening();
+// ------------------------------------------------------------ hand signals ---
+function onHandSignal(signal) {
+  if (signal === "thumb_down") {
+    state.muted = true;
+    listener.pause(); // also drops anything half-heard
+    if (state.phase === "ready" || state.phase === "hearing") setPhase(restPhase());
+    showSignal("thumb_down");
+  } else if (signal === "thumb_up") {
+    state.muted = false;
+    if (state.phase !== "speaking") listener.resume(); // while speaking, it resumes when speech ends
+    if (state.phase === "paused" || state.phase === "off") setPhase(restPhase());
+    showSignal("thumb_up");
+  } else if (signal === "index_up") {
+    const stopped = interrupt();
+    let detail = "Index finger: nothing to stop right now.";
+    if (stopped) {
+      detail = state.muted
+        ? "Index finger: I stopped talking. I'm still not listening; thumbs up when you want me back."
+        : "Index finger: I stopped talking and I'm listening.";
+    }
+    showSignal("index_up", detail);
+  }
+}
+
+/** The side panel's message box: which signal was seen last and what it did. */
+function showSignal(kind, detail) {
+  const [icon, title, text] = SIGNAL_TEXT[kind];
+  const box = $("signal");
+  box.dataset.signal = kind;
+  $("signal-icon").textContent = icon;
+  $("signal-title").textContent = title;
+  $("signal-text").textContent = detail || text;
+  if (SIGNALS_THAT_FLASH.has(kind)) {
+    box.classList.remove("is-new");
+    void box.offsetWidth; // restart the highlight animation
+    box.classList.add("is-new");
+  }
+}
+const SIGNALS_THAT_FLASH = new Set(["thumb_up", "thumb_down", "index_up"]);
+
+/**
+ * The user wants the floor back (raised finger, or Esc): stop talking or stop waiting for an
+ * answer, and listen right away. Listening resumes immediately rather than after the usual
+ * pause, because someone who interrupts usually starts talking at once.
+ */
+function interrupt() {
+  if (state.phase === "speaking") speaker.cancel();
+  else if (state.phase === "thinking") state.abort?.abort();
+  else return false; // nothing to interrupt
+  if (listener.active) resumeListening();
+  setPhase(restPhase());
+  return true;
+}
+
+// ----------------------------------------------------------------- camera ---
+function cameraErrorMessage(err) {
+  if (!window.isSecureContext) return "The browser only allows the camera on localhost or https.";
+  if (err?.name === "NotAllowedError") return "Camera access is blocked. Allow it in this site's browser settings.";
+  if (err?.name === "NotFoundError") return "No camera found. Plug one in and try again.";
+  if (err?.name === "NotReadableError") return "The camera is in use by another app. Close it and try again.";
+  if (err?.name === "ModelLoadError") return `Couldn't load hand tracking. It downloads once on first use, so check the internet connection. (${err.message})`;
+  return `Couldn't start the camera (${err?.message || "unknown error"}).`;
+}
+
+/** Show what the tracker sees on the preview's frame, wherever the preview is. */
+function setHand(value) {
+  $("gesture").dataset.hand = value;
+  $("cam-panel").dataset.hand = value;
+}
+
+function setCameraUi(mode) {
+  const box = $("gesture");
+  box.dataset.state = mode;
+  const button = $("gesture-toggle");
+  button.textContent = mode === "off" ? "Use camera" : "Turn camera off";
+  button.disabled = mode === "loading";
+  button.setAttribute("aria-pressed", String(mode === "on"));
+  $("gesture-text").textContent = {
+    off: "Camera off. Turn it on to use hand signals.",
+    loading: "Starting the camera and hand tracking…",
+    on: "Hand signals are on. Video stays in this browser.",
+  }[mode];
+  if (mode !== "on") setHand("none");
+  if (mode === "off") showSignal("off");
+  else if (mode === "on" && ["off", undefined].includes($("signal").dataset.signal)) showSignal("idle");
+  $("cam-panel").hidden = !(mode === "on" && state.largePreview);
+  if (state.phase === "speaking") setPhase("speaking"); // refresh the hint
+}
+
+/** Small preview under the type box, or a large one docked at the top of the side column. */
+function setPreviewSize(large) {
+  state.largePreview = large;
+  const button = $("cam-size");
+  // Moving a playing <video> within the same task keeps it playing; play() again just in case.
+  if (large) $("cam-dock").append(button);
+  else $("gesture").prepend(button);
+  $("cam").play?.().catch(() => {});
+  $("cam-panel").hidden = !(large && gestures.active);
+  button.setAttribute("aria-pressed", String(large));
+  button.setAttribute("aria-label", large ? "Shrink camera preview" : "Enlarge camera preview");
+  button.title = large ? "Click to shrink" : "Click to enlarge";
+  store.set("labvoice.camera.size", large ? "large" : "small");
+}
+
+async function toggleCamera() {
+  if (gestures.active) {
+    gestures.stop();
+    setCameraUi("off");
+    store.set("labvoice.camera", "off");
+    return;
+  }
+  if (!gestures.supported) {
+    setStatus("This browser can't use a camera.", { error: true });
+    return;
+  }
+  setCameraUi("loading");
+  try {
+    await gestures.start($("cam"));
+    setCameraUi("on");
+    store.set("labvoice.camera", "on");
+  } catch (err) {
+    gestures.stop();
+    setCameraUi("off");
+    setStatus(cameraErrorMessage(err), { error: true });
+  }
 }
 
 async function ask(text) {
@@ -394,12 +545,13 @@ async function loadHealth() {
 }
 
 function wire() {
-  $("talk").addEventListener("click", onSlideClick);
+  document.addEventListener("pointerdown", onFirstInteraction);
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    if (state.phase === "speaking") stopSpeaking();
-    else if (state.phase === "thinking") state.abort?.abort();
+    onFirstInteraction();
+    if (e.key === "Escape") interrupt();
   });
+  $("gesture-toggle").addEventListener("click", toggleCamera);
+  $("cam-size").addEventListener("click", () => setPreviewSize(!state.largePreview));
 
   $("type-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -421,7 +573,13 @@ function wire() {
 }
 
 setPhase("off");
+setCameraUi("off");
+setPreviewSize(store.get("labvoice.camera.size") === "large");
 wire();
+startListening(); // always on: no button to press
+// Reopen the camera if it was on last time. Browsers allow this without a click once the
+// camera permission is granted; if they don't, the button still works.
+if (store.get("labvoice.camera") === "on") toggleCamera();
 await loadUsers();
 loadHealth();
 refreshQueue();

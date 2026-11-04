@@ -88,6 +88,26 @@ def _run(path: str) -> tuple[str, str]:
     return clean_transcript(segments), info.language
 
 
+def warm_up() -> float:
+    """Load Whisper and run it once on a second of silence, so the first real question doesn't pay
+    for model loading and CUDA initialization (observed: 7.2 s for the first question, ~0.5 s after).
+    Returns the time it took, in milliseconds."""
+    import numpy as np
+
+    start = time.perf_counter()
+    _ensure_loaded()
+    try:
+        segments, _ = _state["model"].transcribe(np.zeros(16000, dtype=np.float32), beam_size=1, language="en")
+        list(segments)
+    except RuntimeError as exc:  # CUDA libraries missing at inference: same fallback as transcribe_file
+        if _state["device"] == "cpu":
+            raise
+        log.warning("Whisper failed on %s at warm-up (%s); switching to CPU int8", _state["device"], exc)
+        with _lock:
+            _load("cpu", "int8")
+    return (time.perf_counter() - start) * 1000
+
+
 def transcribe_file(path: str) -> dict[str, Any]:
     start = time.perf_counter()
     _ensure_loaded()

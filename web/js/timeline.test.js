@@ -61,3 +61,13 @@ test("durations format for humans", () => {
   assert.equal(formatMs(1234), "1.2 s");
   assert.equal(formatMs(null), "");
 });
+
+test("SOP searches show the sections they found, or that nothing covered the question", () => {
+  const hit = describeEvent({ kind: "tool", name: "sops__search_sops", ok: true, latency_ms: 40,
+    payload: { args: { question: "qc failed" }, found: ["SOP-420 §3", "SOP-420 §4"], coverage: "ok" } });
+  assert.equal(hit.title, "Searched SOPs");
+  assert.equal(hit.detail, "question qc failed → SOP-420 §3, SOP-420 §4");
+  const miss = describeEvent({ kind: "tool", name: "sops__search_sops", ok: true,
+    payload: { args: { question: "frozen section" }, found: ["SOP-230 §2"], coverage: "weak" } });
+  assert.equal(miss.detail, "question frozen section → not covered");
+});

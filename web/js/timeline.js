@@ -9,6 +9,8 @@ const TOOL_LABELS = {
   order_stain: "Stain order",
   flag_specimen: "Specimen flag",
   set_instrument_status: "Instrument status change",
+  search_sops: "Searched SOPs",
+  read_sop: "Read SOP",
 };
 
 /** "lims__get_specimen" -> "get_specimen" */
@@ -52,9 +54,13 @@ export function describeEvent(e) {
     case "tool": {
       const ok = e.ok !== false;
       const retried = p.attempts > 1 ? ` (after ${p.attempts} attempts)` : "";
+      // Retrieval tools also report what they found: "→ SOP-420 §3, SOP-420 §4" or "→ not covered".
+      const found = Array.isArray(p.found)
+        ? p.coverage === "weak" ? " → not covered" : p.found.length ? ` → ${p.found.join(", ")}` : ""
+        : "";
       return {
         title: toolLabel(e.name),
-        detail: ok ? formatArgs(p.args) + retried : `failed: ${p.error || "error"}`,
+        detail: ok ? formatArgs(p.args) + retried + found : `failed: ${p.error || "error"}`,
         tone: ok ? "ok" : "bad",
         ms: e.latency_ms,
         code: true,
@@ -94,7 +100,7 @@ export function latencySegments({ sttMs = null, trace = [], ttsStartMs = null } 
   const segs = [];
   if (sttMs !== null) segs.push({ key: "stt", label: "Speech to text", ms: sttMs });
   segs.push({ key: "model", label: "Model", ms: modelMs });
-  segs.push({ key: "tools", label: "LIMS", ms: toolMs });
+  segs.push({ key: "tools", label: "Tools", ms: toolMs });
   if (otherMs >= 1) segs.push({ key: "other", label: "Other", ms: otherMs });
   if (ttsStartMs !== null) segs.push({ key: "tts", label: "Voice start", ms: ttsStartMs });
   return segs.map((s) => ({ ...s, ms: Math.round(s.ms) }));

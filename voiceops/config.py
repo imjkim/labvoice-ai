@@ -48,6 +48,10 @@ class Settings:
     lims_db_path: str = _env("LIMS_DB_PATH", str(ROOT / "data" / "lims.db"))
     lims_fault_rate: str = _env("LIMS_FAULT_RATE", "0")
 
+    # SOP search embeddings (any OpenAI-compatible /embeddings endpoint; "" = keyword search only).
+    sop_embed_model: str = _env("SOP_EMBED_MODEL", "nomic-embed-text")
+    sop_embed_cache: str = _env("SOP_EMBED_CACHE", str(ROOT / "data" / "sop_embeddings.json"))
+
     whisper_model: str = _env("WHISPER_MODEL", "small")
     whisper_device: str = _env("WHISPER_DEVICE", "cuda")
     whisper_compute_type: str = _env("WHISPER_COMPUTE_TYPE", "int8_float16")
@@ -56,7 +60,8 @@ class Settings:
 settings = Settings()
 
 
-def default_servers(lims_db_path: str | None = None, fault_rate: str | None = None) -> list[ServerSpec]:
+def default_servers(lims_db_path: str | None = None, fault_rate: str | None = None,
+                    sop_embeddings: bool = True) -> list[ServerSpec]:
     return [
         ServerSpec(
             name="lims",
@@ -67,5 +72,17 @@ def default_servers(lims_db_path: str | None = None, fault_rate: str | None = No
                 "LIMS_FAULT_RATE": fault_rate if fault_rate is not None else settings.lims_fault_rate,
             },
             trusted=True,  # first-party server we wrote and reviewed
+        ),
+        ServerSpec(
+            name="sops",
+            command=sys.executable,
+            args=["-m", "servers.sop_server"],
+            env={
+                "SOP_EMBED_MODEL": settings.sop_embed_model if sop_embeddings else "",
+                "SOP_EMBED_URL": settings.llm_base_url,
+                "LLM_API_KEY": settings.llm_api_key,
+                "SOP_EMBED_CACHE": settings.sop_embed_cache,
+            },
+            trusted=True,  # first-party, read-only
         ),
     ]

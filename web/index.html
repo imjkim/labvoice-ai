@@ -28,7 +28,7 @@
     <section class="talk" aria-label="Conversation">
       <div class="convo-scroll">
         <div id="empty" class="empty">
-          <p class="empty-lead">Turn on the microphone, then ask about any specimen, stain, instrument or QC run. You can also type.</p>
+          <p class="empty-lead">Just ask about any specimen, stain, instrument, QC run or procedure. You can also type.</p>
           <div id="overview-wrap" class="overview" hidden>
             <p class="overview-title">In the lab right now</p>
             <ul id="overview"></ul>
@@ -38,18 +38,25 @@
       </div>
 
       <div class="controls">
-        <button id="talk" class="slide" type="button" aria-pressed="false" aria-describedby="talk-hint">
+        <div id="talk" class="slide" role="status" aria-live="polite">
           <span class="slide-label">
             <span id="talk-state" class="slide-state">Microphone off</span>
-            <span id="talk-hint" class="slide-hint">click to start listening</span>
+            <span id="talk-hint" class="slide-hint">starting…</span>
           </span>
           <span class="slide-tissue" aria-hidden="true"></span>
-        </button>
+        </div>
         <form id="type-form" class="type">
           <label for="type-input" class="sr-only">Type a question</label>
           <input id="type-input" type="text" placeholder="Or type a question" autocomplete="off">
           <button type="submit" class="btn">Ask</button>
         </form>
+        <div id="gesture" class="gesture" data-state="off" data-hand="none">
+          <button id="cam-size" class="gesture-cam-wrap" type="button" aria-pressed="false" aria-label="Enlarge camera preview" title="Click to enlarge">
+            <video id="cam" class="gesture-cam" muted playsinline aria-hidden="true"></video>
+          </button>
+          <p id="gesture-text" class="gesture-text" aria-live="polite"></p>
+          <button id="gesture-toggle" type="button" class="btn" aria-pressed="false">Use camera</button>
+        </div>
         <div class="controls-row">
           <p id="status" class="status" role="status" aria-live="polite"></p>
           <button id="new-convo" type="button" class="btn-link">New conversation</button>
@@ -58,6 +65,21 @@
     </section>
 
     <aside class="side">
+      <section class="panel" aria-labelledby="signal-heading">
+        <h2 id="signal-heading">Hand signal</h2>
+        <div id="signal" class="signal" data-signal="off" role="status" aria-live="polite">
+          <span id="signal-icon" class="signal-icon" aria-hidden="true">✋</span>
+          <div>
+            <p id="signal-title" class="signal-title">Camera off</p>
+            <p id="signal-text" class="signal-text">Turn on the camera to use hand signals.</p>
+          </div>
+        </div>
+      </section>
+      <section id="cam-panel" class="panel cam-panel" aria-labelledby="cam-heading" data-hand="none" hidden>
+        <h2 id="cam-heading">Camera</h2>
+        <div id="cam-dock"></div>
+        <p class="panel-empty">Raise your index finger to stop an answer. Click the picture to shrink it.</p>
+      </section>
       <section class="panel" aria-labelledby="queue-heading">
         <h2 id="queue-heading">Waiting for approval <span id="queue-count" class="count"></span></h2>
         <ul id="queue" class="queue"></ul>
