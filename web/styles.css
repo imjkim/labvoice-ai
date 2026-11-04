@@ -106,7 +106,7 @@ p { margin: 0; }
 .msg-note .msg-who { color: var(--amber); }
 .msg-note .msg-text { font-size: var(--step-0); }
 
-/* --------------------------------------------- the talk button: a glass slide */
+/* ------------------------------------- the listening indicator: a glass slide */
 .controls { display: flex; flex-direction: column; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .slide {
   position: relative;
@@ -117,8 +117,7 @@ p { margin: 0; }
   border: 1px solid #c3ccd5;
   border-radius: 10px;
   background: linear-gradient(160deg, #fbfdfe 0%, #edf2f6 55%, #e4ebf1 100%);
-  cursor: pointer;
-  user-select: none; -webkit-user-select: none; touch-action: none;
+  user-select: none; -webkit-user-select: none;
   overflow: hidden;
 }
 .slide-label {
@@ -144,7 +143,8 @@ p { margin: 0; }
   box-shadow: inset 0 0 0 1px rgb(120 90 120 / 0.12);
   transition: background-color 220ms ease, transform 220ms ease;
 }
-body[data-phase="off"] .slide:hover .slide-tissue { background: #eedcea; }
+body[data-phase="paused"] .slide-tissue { background: #e3e7eb; box-shadow: inset 0 0 0 2px #c3ccd5; }
+body[data-phase="paused"] .slide-state { color: var(--ink-2); }
 body[data-phase="ready"] .slide-tissue { background: var(--hema-soft); box-shadow: inset 0 0 0 2px var(--hema-light); }
 body[data-phase="ready"] .slide-state { color: var(--hema); }
 /* While hearing someone, the tissue follows their voice (--level is 0..1, set ~50 times a second). */
@@ -184,7 +184,24 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
 .gesture[data-state="off"] .gesture-cam-wrap { display: none; }
 .gesture[data-state="loading"] .gesture-cam { opacity: 0.4; }
 [data-hand="seen"] .gesture-cam-wrap { border-color: var(--hema-light); }
-[data-hand="up"] .gesture-cam-wrap { border-color: var(--eosin); }
+[data-hand="sign"] .gesture-cam-wrap { border-color: var(--eosin); }
+
+/* hand-signal message box: which signal was seen last and what it did */
+.signal {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.75rem 0.9rem; border-radius: var(--radius);
+  border: 1px solid var(--line); border-left-width: 4px; background: var(--glass);
+}
+.signal-icon { font-size: 1.9rem; line-height: 1; }
+.signal-title { font-weight: 700; }
+.signal-text { font-size: var(--small); color: var(--ink-2); }
+.signal[data-signal="thumb_up"] { border-left-color: var(--hema); background: var(--hema-soft); }
+.signal[data-signal="thumb_up"] .signal-title { color: var(--hema); }
+.signal[data-signal="thumb_down"] { border-left-color: var(--slate); background: var(--glass); }
+.signal[data-signal="index_up"] { border-left-color: var(--eosin); background: var(--eosin-soft); }
+.signal[data-signal="index_up"] .signal-title { color: #a8385d; }
+.signal.is-new { animation: signal-in 700ms ease-out; }
+@keyframes signal-in { from { box-shadow: 0 0 0 4px rgb(75 59 143 / 0.3); } to { box-shadow: 0 0 0 0 transparent; } }
 .cam-panel .gesture-cam-wrap { width: 100%; cursor: zoom-out; margin-bottom: 0.5rem; }
 .cam-panel .gesture-cam { width: 100%; aspect-ratio: 16 / 9; }
 .controls-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; max-width: 540px; }
@@ -271,4 +288,5 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
   .slide-tissue { transition: none; }
   body[data-phase="thinking"] .slide-tissue { animation: none; opacity: 0.8; }
   body[data-phase="hearing"] .slide-tissue { transform: none; }
+  .signal.is-new { animation: none; }
 }

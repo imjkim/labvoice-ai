@@ -90,9 +90,10 @@ Open http://localhost:8000, click the slide once to turn the microphone on, and 
 it's hands-free: ask "Why isn't 312 ready yet?" and pause; it detects when you start and stop talking.
 Ask it to order a stain, then switch **You are** to D. Reyes (supervisor) to approve it.
 
-To stop it mid-answer without touching anything, click **Use camera** and raise your index finger while
-it talks; it stops and listens. Hand tracking runs in the browser (MediaPipe) and video never leaves the
-page. Esc or a click on the slide also works.
+The microphone is always on. With **Use camera** on, three hand signals control it without touching
+anything: index finger up stops it talking, thumbs down stops it listening, thumbs up starts again. A side
+panel shows the last signal it saw. Hand tracking runs in the browser (MediaPipe) and video never leaves
+the page. Esc also stops it talking.
 
 ```bash
 python -m pytest -q                # agent, LIMS server, roles, grounding (Python)

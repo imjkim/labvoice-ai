@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { GestureDebouncer, isIndexUp, isStopGesture } from "./gesture.js";
+import { GestureDebouncer, classifyHand, detectGesture, isIndexUp, isStopGesture, thumbSignal } from "./gesture.js";
 
 // A synthetic right hand in normalized image coordinates (x right, y down), wrist at the bottom.
 // Each finger: [mcp, pip, dip, tip]. "up" fingers are straight and vertical; "folded" fingers
@@ -27,8 +27,17 @@ function tiltedIndex(deg) {
   );
 }
 
-function hand({ index = "up", middle = "folded", ring = "folded", pinky = "folded", indexPts } = {}) {
-  const thumb = [{ x: 0.42, y: 0.85 }, { x: 0.38, y: 0.8 }, { x: 0.36, y: 0.76 }, { x: 0.35, y: 0.72 }];
+// Thumb poses: [cmc, mcp, ip, tip]. "tucked" curls across the palm; "up" sticks straight up past
+// the folded fingers (a thumbs-up fist); "side" points straight out to the left.
+const THUMBS = {
+  rest: [{ x: 0.42, y: 0.85 }, { x: 0.38, y: 0.8 }, { x: 0.36, y: 0.76 }, { x: 0.35, y: 0.72 }],
+  tucked: [{ x: 0.44, y: 0.85 }, { x: 0.41, y: 0.79 }, { x: 0.44, y: 0.74 }, { x: 0.48, y: 0.72 }],
+  up: [{ x: 0.43, y: 0.84 }, { x: 0.41, y: 0.72 }, { x: 0.405, y: 0.6 }, { x: 0.4, y: 0.5 }],
+  side: [{ x: 0.43, y: 0.84 }, { x: 0.36, y: 0.8 }, { x: 0.27, y: 0.8 }, { x: 0.19, y: 0.8 }],
+};
+
+function hand({ index = "up", middle = "folded", ring = "folded", pinky = "folded", indexPts, thumb: t = "rest" } = {}) {
+  const thumb = THUMBS[t];
   return [
     WRIST,
     ...thumb,
@@ -86,25 +95,65 @@ test("either MediaPipe's confident Pointing_Up or the landmark check triggers a 
   assert.equal(isStopGesture(twoHands), true, "the second hand counts too");
 });
 
-test("the debouncer needs the finger held, then fires once per raise", () => {
-  const d = new GestureDebouncer({ holdMs: 200, cooldownMs: 1000 });
-  assert.equal(d.push(true, 0), false);
-  assert.equal(d.push(true, 150), false, "not held long enough yet");
-  assert.equal(d.push(true, 210), true, "fires once held");
-  assert.equal(d.push(true, 400), false, "does not repeat while still held");
-  assert.equal(d.push(false, 500), false);
-  assert.equal(d.push(true, 600), false);
-  assert.equal(d.push(true, 900), false, "re-raised, but inside the cooldown");
-  assert.equal(d.push(false, 1000), false);
-  assert.equal(d.push(true, 1300), false);
-  assert.equal(d.push(true, 1520), true, "re-raised after the cooldown");
+/** Mirror a hand top to bottom: a thumbs-up fist becomes a thumbs-down fist. */
+const flip = (landmarks) => landmarks.map((l) => ({ x: l.x, y: 1.5 - l.y }));
+
+test("a fist with the thumb up or down is a thumbs signal", () => {
+  const up = hand({ index: "folded", thumb: "up" });
+  assert.equal(thumbSignal(up), "thumb_up");
+  assert.equal(thumbSignal(flip(up)), "thumb_down");
+  assert.equal(classifyHand(up), "thumb_up");
+  assert.equal(classifyHand(flip(up)), "thumb_down");
+});
+
+test("a tucked or sideways thumb, an open hand, or a raised index finger is not a thumbs signal", () => {
+  assert.equal(thumbSignal(hand({ index: "folded", thumb: "tucked" })), null, "plain fist");
+  assert.equal(thumbSignal(hand({ index: "folded", thumb: "side" })), null, "thumb pointing sideways");
+  assert.equal(thumbSignal(hand({ thumb: "up", middle: "up", ring: "up", pinky: "up" })), null, "open hand");
+  assert.equal(thumbSignal(hand({ thumb: "up" })), null, "index up too: that's not a fist");
+  assert.equal(classifyHand(hand()), "index_up");
+  assert.equal(classifyHand(hand({ index: "folded", thumb: "tucked" })), null);
+});
+
+test("MediaPipe's confident labels map to the three signals; otherwise the landmarks decide", () => {
+  const label = (categoryName, score, landmarks = []) => ({ gestures: [[{ categoryName, score }]], landmarks });
+  assert.equal(detectGesture(label("Thumb_Down", 0.8)), "thumb_down");
+  assert.equal(detectGesture(label("Thumb_Up", 0.8)), "thumb_up");
+  assert.equal(detectGesture(label("Pointing_Up", 0.8)), "index_up");
+  assert.equal(detectGesture(label("Thumb_Up", 0.3)), null, "unsure and no landmarks");
+  assert.equal(detectGesture(label("None", 0.9, [flip(hand({ index: "folded", thumb: "up" }))])), "thumb_down");
+  assert.equal(detectGesture(label("Victory", 0.9, [hand({ middle: "up" })])), null);
+  assert.equal(isStopGesture(label("Thumb_Up", 0.9)), false, "a thumbs up doesn't stop speech");
+});
+
+test("each signal must be held, then fires once per gesture", () => {
+  const d = new GestureDebouncer({ holdMs: { index_up: 200, thumb_up: 350, thumb_down: 350 }, cooldownMs: 1000 });
+  assert.equal(d.push("index_up", 0), null);
+  assert.equal(d.push("index_up", 150), null, "not held long enough yet");
+  assert.equal(d.push("index_up", 210), "index_up", "fires once held");
+  assert.equal(d.push("index_up", 400), null, "does not repeat while still held");
+  assert.equal(d.push(null, 500), null);
+  assert.equal(d.push("index_up", 600), null);
+  assert.equal(d.push("index_up", 900), null, "raised again, but inside the cooldown");
+  assert.equal(d.push(null, 1000), null);
+  assert.equal(d.push("index_up", 1300), null);
+  assert.equal(d.push("index_up", 1520), "index_up", "raised again after the cooldown");
+});
+
+test("thumbs need a longer hold, and switching signals restarts it", () => {
+  const d = new GestureDebouncer({ holdMs: { index_up: 200, thumb_up: 350, thumb_down: 350 }, cooldownMs: 0 });
+  d.push("thumb_down", 0);
+  assert.equal(d.push("thumb_down", 250), null, "a fist on its way somewhere else doesn't mute");
+  assert.equal(d.push("thumb_down", 360), "thumb_down");
+  assert.equal(d.push("thumb_up", 400), null, "switched: the hold starts over");
+  assert.equal(d.push("thumb_up", 760), "thumb_up");
 });
 
 test("a single flickering frame resets the hold", () => {
   const d = new GestureDebouncer({ holdMs: 200, cooldownMs: 0 });
-  d.push(true, 0);
-  d.push(true, 150);
-  d.push(false, 180); // detection dropped for a frame
-  assert.equal(d.push(true, 210), false, "the hold starts over");
-  assert.equal(d.push(true, 420), true);
+  d.push("index_up", 0);
+  d.push("index_up", 150);
+  d.push(null, 180); // detection dropped for a frame
+  assert.equal(d.push("index_up", 210), null, "the hold starts over");
+  assert.equal(d.push("index_up", 420), "index_up");
 });

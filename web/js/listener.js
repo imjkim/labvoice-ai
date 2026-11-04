@@ -1,5 +1,7 @@
 // Hands-free listening: microphone -> 20 ms frames -> voice activity detection -> WAV per question.
-// The browser only allows the microphone after a click, so start() must be called from one.
+// start() can run on page load: the microphone opens (after the permission prompt), but browsers
+// keep audio processing suspended until the person first clicks or presses a key on the page.
+// `running` says whether that has happened; unlock() finishes it from inside a click handler.
 
 import { EnergyVad, encodeWav, resample } from "./vad.js";
 
@@ -29,6 +31,11 @@ export class HandsFreeListener {
     return Boolean(this.ctx);
   }
 
+  /** Audio is actually being processed (false until the page has had a click or key press). */
+  get running() {
+    return this.ctx?.state === "running";
+  }
+
   async start() {
     if (this.ctx) return;
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -43,7 +50,13 @@ export class HandsFreeListener {
     this.node.port.onmessage = (e) => this._onFrame(e.data);
     source.connect(this.node);
     this.node.connect(this.ctx.destination); // outputs silence; connecting keeps the worklet running
-    await this.ctx.resume();
+    // Without a prior click, resume() stays pending until one happens; don't wait on it forever.
+    await Promise.race([this.ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
+  }
+
+  /** Call from a click or key handler to start audio processing if the browser held it back. */
+  async unlock() {
+    if (this.ctx && this.ctx.state !== "running") await this.ctx.resume();
   }
 
   async stop() {
