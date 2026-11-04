@@ -20,7 +20,8 @@ instrument wrongly taken offline costs a patient time.
                                      │  ▲
                        tool schemas  │  │ tool results
                                      ▼  │
-                                 MCP host ──stdio──► LIMS MCP server   (SOP/RAG server next)
+                                 MCP host ──stdio──► LIMS MCP server   (specimens, stains, instruments, QC)
+                                     │    └─stdio──► SOP MCP server    (procedures: hybrid search, cited sections)
                                      │
                read-only (trusted)? ─yes─► execute: timeout, retry transient errors once
                                      │no
@@ -56,6 +57,20 @@ target for fine-tuning; and the guard's false-positive rate. It intervened in 2 
 and in one (a refused prompt injection) the user heard the fallback instead of a clear refusal. Reports now
 record exactly what the guard intercepted, so that rate can be measured rather than guessed.
 
+### SOP search
+
+The agent can also answer procedure questions from the lab's SOPs, citing the section it used, and the
+grounding guard rejects citations no search returned (D24). Retrieval is measured on its own: 54
+questions phrased the way techs talk, including 12 paraphrases and 8 the SOPs don't cover.
+
+| Retrieval | hit@1 | hit@3 | MRR | Paraphrase hit@3 | Says "not covered" correctly |
+|---|---|---|---|---|---|
+| Keywords (BM25) | 78.3% | 93.5% | 0.865 | 83.3% | 81.5% |
+| Embeddings (`nomic-embed-text`) | | | | | |
+| Hybrid (RRF) | | | | | |
+
+The agent table above predates the six SOP cases now in `evals/cases.jsonl`.
+
 ## Run it
 
 Needs Python 3.11+ and [Ollama](https://ollama.com).
@@ -64,6 +79,7 @@ Needs Python 3.11+ and [Ollama](https://ollama.com).
 python -m venv .venv && source .venv/Scripts/activate   # Windows Git Bash; use .venv/bin/activate elsewhere
 pip install -r requirements.txt
 ollama pull qwen3:4b-instruct
+ollama pull nomic-embed-text      # SOP search embeddings (optional: keyword search without it)
 uvicorn voiceops.api:app
 ```
 
@@ -82,6 +98,7 @@ page. Esc or a click on the slide also works.
 python -m pytest -q                # agent, LIMS server, roles, grounding (Python)
 cd web && node --test              # client logic (Node 18+, no installs)
 python -m evals.run_evals          # the table above
+python -m evals.run_retrieval      # SOP search: hit@k, MRR, abstention, per retrieval mode
 ```
 
 ## Repository map
@@ -89,6 +106,9 @@ python -m evals.run_evals          # the table above
 ```
 servers/lims_server.py   LIMS as an MCP server (SDK 2.x): specimens, stains, instruments, QC
 servers/synth.py         deterministic synthetic lab with planted scenarios
+servers/sop_server.py    lab procedures as an MCP server: search_sops, read_sop
+servers/sop_index.py     section chunking, BM25 + embeddings fused with RRF, "not covered" signal
+servers/sops/            11 synthetic SOPs (not for clinical use)
 voiceops/mcp_host.py     starts MCP servers, discovers tools, trust policy, timeouts, retries
 voiceops/agent/loop.py   tool-calling loop, schema validation, preflight, approvals, grounding guard
 voiceops/auth.py         demo identities and who may approve what

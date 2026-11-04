@@ -133,6 +133,15 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - **Rejected:** Recognizing gestures on the server with OpenCV (sends video off the device and adds a network hop to every frame); a stop word (needs a keyword spotter that hears through the assistant's own voice, which browser echo cancellation doesn't reliably remove).
 - **Trade-off:** MediaPipe's runtime and the model (about 8 MB) load from a CDN on first use and are then cached by the browser. A lab without internet would need them served from `web/vendor/`; the URLs are constants at the top of `gesture.js`.
 
+### D24. Procedures (SOPs) as a second MCP server, with hybrid search and checked citations
+- **Context:** Many bench questions are about procedure, not data: "IHC-01 failed QC, what do I do?", "how thick for a kidney biopsy?". A model answering those from its training data is the same failure as confabulating a specimen status, and in a lab the procedure is whatever the lab's SOP says.
+- **Decision:** A read-only, trusted MCP server (`servers/sop_server.py`) over 11 synthetic SOPs (`servers/sops/`), with two tools: `search_sops` and `read_sop`. One chunk per numbered section, indexed with the SOP title and section heading in front of the body, so "4. Turnaround" still knows it's about special stains. Retrieval fuses BM25 (exact lab terms: HER2, IHC-01, 4 micrometers) with embeddings from the same OpenAI-compatible endpoint as the chat model (Ollama `nomic-embed-text`) using reciprocal rank fusion, which needs no calibration between the two kinds of scores. Document vectors are cached on disk by content hash. If embeddings are unreachable, search falls back to keywords, says so in the result, and stops retrying for 60 s.
+- **Citations are checked, not trusted:** Results carry `SOP-420 §3` and a speakable form, "SOP 420, section 3". The grounding guard (D18) now also fails an answer that cites a section no search in the same turn returned, and treats a procedure answer with no tool call as unsupported.
+- **Saying "not covered":** When the best section shares under a third of the question's words and (with embeddings) its similarity is under 0.6, the result is marked weak and tells the model to say the SOPs don't cover it. Both thresholds were set before measuring and have not been tuned on the eval set; tuning them needs a dev/test split first (D17).
+- **"Purpose and scope" sections aren't searched:** They repeat each SOP's instruments and stains without saying what to do, and outranked the actual steps (SOP-420 §1 above §3 for "what are the steps"). They're still readable through `read_sop`. On the retrieval set: hit@1 76.1% -> 78.3%, MRR 0.849 -> 0.865, hit@3 unchanged at 93.5%.
+- **Measured (`python -m evals.run_retrieval`):** 54 questions phrased the way techs talk: 46 answerable (34 sharing the SOP's vocabulary, 12 deliberate paraphrases) and 8 the SOPs don't cover (3 of them hard: they share vocabulary, like "what's the cutoff for calling HER2 positive"). Keyword search alone: hit@1 78.3%, hit@3 93.5% (keyword 97.1%, paraphrase 83.3%), MRR 0.865, abstention correct 81.5%; it answers all three hard negatives and misses "flunked its morning check". Embedding and hybrid rows come from a run with Ollama.
+- **Rejected:** A vector database (FAISS, Chroma): 41 searchable sections, and brute-force cosine is microseconds; revisit at thousands of chunks. Framework retrievers: explicit code is easier to evaluate and explain (D9). Putting procedures into the model by fine-tuning: SOPs change and answers need citations. A cross-encoder reranker: deferred until the numbers show ordering within the top 3 is the bottleneck (hit@3 is well above hit@1, so it's the likely next lever).
+
 ---
 
 ## Open questions
@@ -142,6 +151,8 @@ This file is for future maintainers, and for anyone who asks "why didn't you jus
 - Cancel the server-side turn when the user interrupts (D21).
 - A stop word as a voice-only alternative to the raised-finger stop (D23).
 - Serve the MediaPipe runtime and gesture model locally for offline labs (D23).
+- Tune the SOP "not covered" thresholds on a dev split, and decide whether hard negatives need an LLM judge (D24).
+- A reranker for SOP search, if the hybrid numbers show ordering within the top 3 is the bottleneck (D24).
 - Streaming answers (speak the first sentence while the rest is generated).
 
 ---

@@ -35,6 +35,12 @@ _YY = f"S{datetime.now().year % 100:02d}"
 SYSTEM_PROMPT = f"""You are LabVoice, a hands-free assistant for histology lab staff working at the bench.
 
 - Use the LIMS tools for anything about specimens, stains, instruments or QC. Never guess lab data.
+- For how-to and rules questions (what to do when, how long, how thick, who may approve), call search_sops
+  and answer only from the sections it returns, naming the one you used the way its cite_as says, like
+  "SOP 999, section 2". If coverage is weak, say the SOPs don't cover it; never answer procedures from
+  general knowledge.
+- When a question needs both (for example why a case is stuck and what to do about it), check the LIMS
+  first, then search the SOPs for the procedure that applies.
 - Staff usually say only the last digits of an accession (like "4821"). That is enough to act on: pass exactly
   what they said to the tool. Never add or guess a prefix, and don't ask for the full number.
 - When you answer, say the full accession from the tool result (like {_YY}-04821), never just the digits.
@@ -58,7 +64,11 @@ SYSTEM_PROMPT = f"""You are LabVoice, a hands-free assistant for histology lab s
 _IDS = re.compile(r"\bS\d{2}-\d{5}\b|\b[A-Z]{2,3}-\d{2}\b")  # accessions, instrument IDs
 _LAB_FACTS = re.compile(
     r"\b(overdue|blocked|flagged|qc|quality control|stain(?:ed|ing)?|processing|signed out|on hold|"
-    r"maintenance|offline|in progress|slides? ready|under review|embedded|sectioned|grossed)\b", re.I)
+    r"maintenance|offline|in progress|slides? ready|under review|embedded|sectioned|grossed|sop|procedure)\b",
+    re.I)
+# SOP citations as spoken ("SOP 420, section 3") or written ("SOP-420 §3"). A cited section must
+# have been returned by a search in this turn: a made-up citation is a confabulation like any other.
+_SOP_CITE = re.compile(r"\bSOP[\s-]?(\d{3})\b(?:,?\s*(?:section|sec\.?|§)\s*(\d+))?", re.I)
 
 GROUNDING_NUDGE = (
     "[grounding check] Your last reply stated lab facts (specimens, stains, instruments or QC) that no tool "
@@ -70,13 +80,18 @@ UNGROUNDED_FALLBACK = "I couldn't confirm that in the LIMS, so I won't guess. Co
 def grounding_problem(answer: str, evidence: list[str]) -> str | None:
     """Return why `answer` isn't backed by this turn's tool results, or None if it is.
 
-    Two checks: (1) every accession or instrument ID named in the answer must appear in a tool
-    result from this turn; (2) an answer that states lab facts needs at least one tool result.
+    Three checks: (1) every accession or instrument ID named in the answer must appear in a tool
+    result from this turn; (2) every SOP section it cites must have been returned by a search in
+    this turn; (3) an answer that states lab facts needs at least one tool result.
     Facts from earlier turns don't count: lab state changes, so each answer re-reads it."""
-    blob = "\n".join(evidence)
+    blob = "\n".join(evidence).replace("\\u00a7", "§")  # tool results are JSON with ASCII escapes
     missing = sorted({i for i in _IDS.findall(answer) if i not in blob})
     if missing:
         return f"names {', '.join(missing)}, which no tool result in this turn contains"
+    for number, section in _SOP_CITE.findall(answer):
+        cite = f"SOP-{number} §{int(section)}" if section else f"SOP-{number}"
+        if cite not in blob:
+            return f"cites {cite}, which no SOP search in this turn returned"
     if not evidence and _LAB_FACTS.search(answer):
         return "states lab facts without calling any tool"
     return None
@@ -228,8 +243,12 @@ class Agent:
         outcome = await self.host.call(name, args)
         record["status"] = "ok" if outcome.ok else "error"
         record["attempts"] = outcome.attempts
-        trace("tool", name=name, latency_ms=outcome.latency_ms, ok=outcome.ok,
-              payload={"args": args, "attempts": outcome.attempts, "error": outcome.error})
+        payload = {"args": args, "attempts": outcome.attempts, "error": outcome.error}
+        if outcome.ok and isinstance(outcome.data, dict) and isinstance(outcome.data.get("results"), list):
+            # Retrieval tools: record what was found, so the trace shows which sources the answer could use.
+            payload["found"] = [r["citation"] for r in outcome.data["results"] if isinstance(r, dict) and "citation" in r]
+            payload["coverage"] = outcome.data.get("coverage")
+        trace("tool", name=name, latency_ms=outcome.latency_ms, ok=outcome.ok, payload=payload)
         return outcome.for_model()
 
     async def resolve_action(self, action_id: str, approve: bool, by: User) -> dict[str, Any]:
