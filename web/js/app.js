@@ -31,6 +31,7 @@ const state = {
   sessionId: null,
   abort: null,
   users: [],
+  largePreview: false,
 };
 const api = createApi(() => state.userId);
 const speaker = new Speaker();
@@ -46,9 +47,7 @@ const listener = new HandsFreeListener({
 });
 const gestures = new GestureWatcher({
   onGesture: () => interrupt("Stopped: you raised a finger."),
-  onState: ({ hand, up }) => {
-    $("gesture").dataset.hand = up ? "up" : hand ? "seen" : "none";
-  },
+  onState: ({ hand, up }) => setHand(up ? "up" : hand ? "seen" : "none"),
 });
 
 /** The phase to return to when nothing is happening. */
@@ -239,6 +238,12 @@ function cameraErrorMessage(err) {
   return `Couldn't start the camera (${err?.message || "unknown error"}).`;
 }
 
+/** Show what the tracker sees on the preview's frame, wherever the preview is. */
+function setHand(value) {
+  $("gesture").dataset.hand = value;
+  $("cam-panel").dataset.hand = value;
+}
+
 function setCameraUi(mode) {
   const box = $("gesture");
   box.dataset.state = mode;
@@ -251,8 +256,24 @@ function setCameraUi(mode) {
     loading: "Starting the camera and hand tracking…",
     on: "Raise your index finger to stop an answer. Video stays in this browser.",
   }[mode];
-  if (mode !== "on") box.dataset.hand = "none";
+  if (mode !== "on") setHand("none");
+  $("cam-panel").hidden = !(mode === "on" && state.largePreview);
   if (state.phase === "speaking") setPhase("speaking"); // refresh the hint
+}
+
+/** Small preview under the type box, or a large one docked at the top of the side column. */
+function setPreviewSize(large) {
+  state.largePreview = large;
+  const button = $("cam-size");
+  // Moving a playing <video> within the same task keeps it playing; play() again just in case.
+  if (large) $("cam-dock").append(button);
+  else $("gesture").prepend(button);
+  $("cam").play?.().catch(() => {});
+  $("cam-panel").hidden = !(large && gestures.active);
+  button.setAttribute("aria-pressed", String(large));
+  button.setAttribute("aria-label", large ? "Shrink camera preview" : "Enlarge camera preview");
+  button.title = large ? "Click to shrink" : "Click to enlarge";
+  store.set("labvoice.camera.size", large ? "large" : "small");
 }
 
 async function toggleCamera() {
@@ -470,6 +491,7 @@ function wire() {
     if (e.key === "Escape") interrupt();
   });
   $("gesture-toggle").addEventListener("click", toggleCamera);
+  $("cam-size").addEventListener("click", () => setPreviewSize(!state.largePreview));
 
   $("type-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -492,6 +514,7 @@ function wire() {
 
 setPhase("off");
 setCameraUi("off");
+setPreviewSize(store.get("labvoice.camera.size") === "large");
 wire();
 // Reopen the camera if it was on last time. Browsers allow this without a click once the
 // camera permission is granted; if they don't, the button still works.

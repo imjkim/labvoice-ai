@@ -161,7 +161,8 @@ export class GestureWatcher {
     // Open the camera and load the model in parallel; if either fails, don't leave the camera on.
     const [cam, model] = await Promise.allSettled([
       navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+        // 720p keeps the enlarged preview sharp; the recognizer scales frames down itself.
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
         audio: false,
       }),
       loadRecognizer(),

@@ -167,20 +167,26 @@ body[data-phase="speaking"] .slide-state { color: #a8385d; }
 .type input {
   flex: 1; padding: 0.55rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
 }
-/* raised-finger stop: a small mirrored preview whose frame shows what the tracker sees */
+/* raised-finger stop: a mirrored preview whose frame shows what the tracker sees.
+   Small, it sits under the type box; enlarged, it docks at the top of the side column. */
 .gesture { display: flex; align-items: center; gap: 0.75rem; max-width: 540px; }
 .gesture-text { flex: 1; font-size: var(--small); color: var(--ink-2); }
-.gesture-cam {
-  flex: none; width: 96px; aspect-ratio: 4 / 3; object-fit: cover;
-  transform: scaleX(-1);           /* mirror, so moving your hand right moves it right */
-  border-radius: var(--radius); background: var(--ink);
-  border: 3px solid var(--line);
+.gesture-cam-wrap {
+  flex: none; padding: 0; line-height: 0; cursor: zoom-in;
+  border: 3px solid var(--line); border-radius: var(--radius); background: var(--ink);
   transition: border-color 120ms ease;
 }
-.gesture[data-state="off"] .gesture-cam { display: none; }
+.gesture-cam {
+  display: block; width: 96px; aspect-ratio: 4 / 3; object-fit: cover;
+  transform: scaleX(-1);           /* mirror, so moving your hand right moves it right */
+  border-radius: 3px;
+}
+.gesture[data-state="off"] .gesture-cam-wrap { display: none; }
 .gesture[data-state="loading"] .gesture-cam { opacity: 0.4; }
-.gesture[data-hand="seen"] .gesture-cam { border-color: var(--hema-light); }
-.gesture[data-hand="up"] .gesture-cam { border-color: var(--eosin); }
+[data-hand="seen"] .gesture-cam-wrap { border-color: var(--hema-light); }
+[data-hand="up"] .gesture-cam-wrap { border-color: var(--eosin); }
+.cam-panel .gesture-cam-wrap { width: 100%; cursor: zoom-out; margin-bottom: 0.5rem; }
+.cam-panel .gesture-cam { width: 100%; aspect-ratio: 16 / 9; }
 .controls-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; max-width: 540px; }
 .status { font-size: var(--small); color: var(--ink-2); min-height: 1.3em; }
 .status.is-error { color: var(--red); font-weight: 700; }

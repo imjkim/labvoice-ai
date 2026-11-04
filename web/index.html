@@ -51,7 +51,9 @@
           <button type="submit" class="btn">Ask</button>
         </form>
         <div id="gesture" class="gesture" data-state="off" data-hand="none">
-          <video id="cam" class="gesture-cam" muted playsinline aria-hidden="true"></video>
+          <button id="cam-size" class="gesture-cam-wrap" type="button" aria-pressed="false" aria-label="Enlarge camera preview" title="Click to enlarge">
+            <video id="cam" class="gesture-cam" muted playsinline aria-hidden="true"></video>
+          </button>
           <p id="gesture-text" class="gesture-text" aria-live="polite"></p>
           <button id="gesture-toggle" type="button" class="btn" aria-pressed="false">Use camera</button>
         </div>
@@ -63,6 +65,11 @@
     </section>
 
     <aside class="side">
+      <section id="cam-panel" class="panel cam-panel" aria-labelledby="cam-heading" data-hand="none" hidden>
+        <h2 id="cam-heading">Camera</h2>
+        <div id="cam-dock"></div>
+        <p class="panel-empty">Raise your index finger to stop an answer. Click the picture to shrink it.</p>
+      </section>
       <section class="panel" aria-labelledby="queue-heading">
         <h2 id="queue-heading">Waiting for approval <span id="queue-count" class="count"></span></h2>
         <ul id="queue" class="queue"></ul>
